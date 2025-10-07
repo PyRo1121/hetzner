@@ -6,6 +6,39 @@
 set -euo pipefail
 
 # ============================================================================
+# COLORS AND LOGGING
+# ============================================================================
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+log() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] [DEPLOY]${NC} $*"; }
+success() { echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] [SUCCESS]${NC} $*"; }
+warning() { echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] [WARNING]${NC} $*"; }
+error() { echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR]${NC} $*" >&2; }
+
+# ============================================================================
+# LOAD ENVIRONMENT VARIABLES FROM .env.local FILE
+# ============================================================================
+
+# Source environment variables from .env.local file if it exists
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/.env.local"
+
+if [[ -f "$ENV_FILE" ]]; then
+    log "Loading environment variables from $ENV_FILE"
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+else
+    log "Warning: $ENV_FILE not found. Using default values and environment variables."
+fi
+
+# ============================================================================
 # CONFIGURATION - EDIT THESE VALUES FOR YOUR DEPLOYMENT
 # ============================================================================
 
@@ -46,23 +79,6 @@ export ENABLE_ADVANCED_MONITORING="${ENABLE_ADVANCED_MONITORING:-true}"
 export ENABLE_BACKUP="${ENABLE_BACKUP:-true}"
 export SSH_PORT="${SSH_PORT:-22}"
 export SSH_ALLOW_IPS="${SSH_ALLOW_IPS:-0.0.0.0/0}"
-
-# ============================================================================
-# COLORS AND LOGGING
-# ============================================================================
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-
-log() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] [DEPLOY]${NC} $*"; }
-success() { echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] [SUCCESS]${NC} $*"; }
-warning() { echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] [WARNING]${NC} $*"; }
-error() { echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] [ERROR]${NC} $*" >&2; }
 
 # ============================================================================
 # PREREQUISITE CHECKS
