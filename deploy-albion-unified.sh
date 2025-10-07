@@ -949,6 +949,10 @@ setup_redis() {
 
     # Check if port 6379 is in use by other processes
     if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
+        log "⚠️  Port 6379 is currently in use. Checking what process is using it..."
+        log "🔍 Running diagnostic commands:"
+        ss -tlnp | grep ":6379 " 2>/dev/null || lsof -i :6379 2>/dev/null || echo "   (No detailed process info available)"
+
         log "Port 6379 is in use by another process, attempting to free it..."
         # Try to find and kill the process using port 6379
         local pid=$(lsof -ti:6379 2>/dev/null || ss -tlnp 2>/dev/null | grep ":6379 " | awk '{print $6}' | cut -d',' -f2 | cut -d'=' -f2 | head -1)
@@ -961,8 +965,18 @@ setup_redis() {
 
     # More aggressive cleanup - kill any existing Redis processes
     log "Ensuring no existing Redis processes are running..."
+    # Kill by process name patterns
+    pkill -f redis-server 2>/dev/null || true
     pkill -f redis 2>/dev/null || true
+    pkill -9 -f redis 2>/dev/null || true
     sleep 3
+
+    # Also check for and kill any Redis processes by port
+    if command -v fuser >/dev/null 2>&1; then
+        log "Using fuser to kill processes on port 6379..."
+        fuser -k 6379/tcp 2>/dev/null || true
+        sleep 2
+    fi
 
     # Kill any process using port 6379 more aggressively
     if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
@@ -981,9 +995,18 @@ setup_redis() {
     # Final check - ensure port is free
     if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
         log "CRITICAL: Port 6379 still in use after cleanup attempts"
-        log "Checking what processes are using it..."
-        ss -tlnp | grep ":6379 " || lsof -i :6379
-        error "Failed to free port 6379. Please manually kill the process using it."
+        log "🔍 TROUBLESHOOTING: Run these commands manually to identify the process:"
+        log "   sudo netstat -tlnp | grep :6379"
+        log "   sudo lsof -i :6379"
+        log "   sudo ss -tlnp | grep :6379"
+        log ""
+        log "💡 If you find a process using port 6379, kill it with:"
+        log "   sudo kill -9 <PID>"
+        log ""
+        log "🔧 Or check for Docker containers using the port:"
+        log "   docker ps -a | grep redis"
+        log "   docker stop <container_id> && docker rm <container_id>"
+        error "Failed to free port 6379. Please manually kill the process using it and re-run the script."
         exit 1
     fi
 
