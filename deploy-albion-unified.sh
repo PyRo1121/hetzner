@@ -239,46 +239,41 @@ setup_supabase() {
     echo "IMGPROXY_ENABLE_WEBP_DETECTION=false" >> .env
     echo "IMGPROXY_ENABLE_CLIENT_HINTS_SUPPORT=false" >> .env
 
-    # Start Supabase services (excluding analytics which often fails)
+    # Start Supabase services (analytics disabled via environment)
     log "Starting Supabase services..."
 
-    # Create a modified docker-compose.yml without analytics service
-    if [[ -f docker-compose.yml ]]; then
-        cp docker-compose.yml docker-compose.yml.backup
-        # Remove analytics service completely from compose file
-        awk '
-        BEGIN { in_analytics = 0 }
-        /^  analytics:/ { in_analytics = 1; next }
-        /^  [a-zA-Z]/ && in_analytics { in_analytics = 0 }
-        !in_analytics { print }
-        ' docker-compose.yml > docker-compose-no-analytics.yml
+    # Start all services - analytics will be disabled by ANALYTICS_ENABLED=false
+    log "Starting all Supabase services (analytics disabled via env var)..."
+    if ! timeout 600 docker compose up -d 2>/dev/null; then
+        log "Some services failed to start, checking which ones are running..."
 
-        # Use the modified compose file
-        COMPOSE_FILE=docker-compose-no-analytics.yml
-    fi
+        # List all running Supabase services
+        docker ps --filter name=supabase --format "table {{.Names}}\t{{.Status}}"
 
-    # Start services with timeout protection
-    log "Starting Supabase services (analytics excluded)..."
-    if ! timeout 600 COMPOSE_FILE=$COMPOSE_FILE docker compose up -d 2>/dev/null; then
-        log "Services failed to start within timeout, checking status..."
-        docker ps --filter name=supabase
-
-        # Check if essential services are running
+        # Check essential services
         essential_services=("supabase-db" "supabase-kong" "supabase-rest" "supabase-auth")
         running_essential=0
 
         for service in "${essential_services[@]}"; do
             if docker ps --filter name="$service" --format "{{.Names}}" | grep -q "$service"; then
+                log "✓ $service is running"
                 ((running_essential++))
+            else
+                log "✗ $service is not running"
             fi
         done
 
         if [[ $running_essential -ge 3 ]]; then
             log "Found $running_essential/4 essential Supabase services running, continuing..."
+            success "✅ Supabase deployment completed with $running_essential essential services"
         else
-            error "Only $running_essential/4 essential services running, deployment failed"
+            error "Only $running_essential/4 essential services running"
+            error "This might indicate insufficient resources or port conflicts"
+            error "Check: free -h, df -h, netstat -tlnp | grep :5432"
             exit 1
         fi
+    else
+        log "All Supabase services started successfully"
     fi
 
     # Wait for services to be ready
