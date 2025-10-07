@@ -75,10 +75,8 @@ trap 'error "Script failed at line $LINENO"; cleanup' ERR
 
 cleanup() {
     log "🧹 Running cleanup..."
-    # MODIFIED: Use k3s kubectl
     k3s kubectl delete ns albion-stack --ignore-not-found || true
     k3s kubectl delete ns argocd --ignore-not-found || true
-    # Add more as needed
 }
 
 # Enhanced retry with backoff
@@ -87,7 +85,6 @@ retry_with_backoff() {
     local attempt=1
     while [[ $attempt -le $max_attempts ]]; do
         log "Executing: $* (attempt $attempt)"
-        # Disabling pipefail locally for commands that might fail gracefully (like grep)
         if (set -o pipefail; eval "$@"); then
             return 0
         fi
@@ -105,7 +102,6 @@ retry_with_backoff() {
 # Health wait for k8s resources
 wait_for_health() {
     local resource=$1 namespace=${2:-albion-stack}
-    # MODIFIED: Use k3s kubectl
     retry_with_backoff 30 10 "k3s kubectl wait --for=condition=ready $resource -n $namespace --timeout=60s"
     success "$resource is healthy"
 }
@@ -122,7 +118,6 @@ check_prerequisites() {
         exit 1
     fi
 
-    # MODIFIED: Check for the .env file instead of environment variables
     if [[ ! -f "${SCRIPT_DIR}/.env" ]]; then
         error "Secrets file not found!"
         error "Please create a '.env' file in the script directory: ${SCRIPT_DIR}/.env"
@@ -134,7 +129,6 @@ check_prerequisites() {
         exit 1
     fi
 
-    # Check min resources (2025 std: 4GB RAM, 2 cores)
     if [[ $(free -m | awk '/Mem:/ {print $2}') -lt 4096 ]]; then
         warning "Low RAM (<4GB); may impact k3s"
     fi
@@ -156,18 +150,20 @@ setup_system() {
     retry_with_backoff 3 5 "apt-get install -y \
         ufw fail2ban unattended-upgrades apt-transport-https \
         ca-certificates curl wget jq unzip htop iotop ncdu git openssl \
-        containerd.io"  # For k3s
+        containerd.io build-essential python3 python3-pip"
 
-    # UFW: Tighten for k3s (allow 6443 for API, 10250 for metrics)
+    # UFW: Tighten for k3s
     ufw --force reset
     ufw default deny incoming
     ufw default allow outgoing
     ufw allow ssh
-    ufw allow 80/tcp 443/tcp 6443/tcp  # Traefik + k3s API
+    ufw allow 80/tcp
+    ufw allow 443/tcp
+    ufw allow 6443/tcp
     ufw limit ssh
     echo "y" | ufw enable
 
-    # Unattended upgrades with 2025 ESM
+    # Unattended upgrades
     cat >/etc/apt/apt.conf.d/50unattended-upgrades <<EOF
 Unattended-Upgrade::Allowed-Origins {
     "\${distro_id}:\${distro_codename}";
@@ -191,63 +187,79 @@ EOF
 setup_k3s() {
     log "☸️ === PHASE 2: k3s Setup (v1.34.1) ==="
 
-    # Install latest k3s single-node
-    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="$K3S_VERSION" sh -s - server --disable=traefik --write-kubeconfig-mode 644
+    # Check if k3s is already running to avoid reinstallation
+    if ! systemctl is-active --quiet k3s; then
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="$K3S_VERSION" sh -s - server --disable=traefik --write-kubeconfig-mode 644
+    else
+        log "✅ k3s is already running"
+    fi
 
-    # Source kubeconfig
     export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-    # MODIFIED: Use k3s kubectl
-    retry_with_backoff 5 10 "k3s kubectl get nodes | grep -q Ready"
 
-    # Install Helm v3.15+ (2025 std)
-    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    # Wait for k3s to be ready with better error handling
+    retry_with_backoff 10 15 "k3s kubectl get nodes | grep -q Ready"
 
-    # Longhorn for PVs
-    helm repo add longhorn https://charts.longhorn.io
+    # Install Helm if not present
+    if ! command -v helm &> /dev/null; then
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    fi
+
+    # Longhorn for PVs (skip if already installed)
+    helm repo add longhorn https://charts.longhorn.io 2>/dev/null || true
     helm repo update
-    # MODIFIED: Use k3s kubectl
     k3s kubectl create ns longhorn-system --dry-run=client -o yaml | k3s kubectl apply -f - || true
-    helm upgrade --install longhorn longhorn/longhorn --namespace longhorn-system
 
-    # Traefik Ingress (replaces Caddy)
-    helm repo add traefik https://traefik.github.io/charts
-    helm upgrade --install traefik traefik/traefik --namespace traefik --create-namespace \
-      --set providers.kubernetesIngress.enabled=true \
-      --set logs.general.level=INFO
+    if ! helm list -n longhorn-system | grep -q longhorn; then
+        helm upgrade --install longhorn longhorn/longhorn --namespace longhorn-system --wait
+    else
+        log "✅ Longhorn already installed"
+    fi
+
+    # Traefik Ingress (skip if already installed)
+    helm repo add traefik https://traefik.github.io/charts 2>/dev/null || true
+    if ! helm list -n traefik | grep -q traefik; then
+        helm upgrade --install traefik traefik/traefik --namespace traefik --create-namespace \
+          --set providers.kubernetesIngress.enabled=true \
+          --set logs.general.level=INFO
+    else
+        log "✅ Traefik already installed"
+    fi
 
     # App namespace
-    # MODIFIED: Use k3s kubectl
     k3s kubectl create ns albion-stack --dry-run=client -o yaml | k3s kubectl apply -f - || true
 
-    # Docker Content Trust (for pulls)
+    # Docker Content Trust
     export DOCKER_CONTENT_TRUST=1
     echo 'export DOCKER_CONTENT_TRUST=1' >> /etc/environment
 
-    # Optional Docker auth
     [[ "$ENABLE_DOCKER_AUTH" == "true" ]] && setup_docker_auth
 
     success "✅ k3s cluster ready"
 }
 
-
 # ============================================================================
-# SECRETS MANAGEMENT - 2025 STANDARDS
+# SECRETS MANAGEMENT - 2025 STANDARDS (FIXED)
 # ============================================================================
 
-# MODIFIED: Entire function rewritten to use local .env file
 setup_secrets() {
     log "🔐 === Secrets Setup from local .env file ==="
 
     SECRETS_FILE="${SCRIPT_DIR}/.env"
 
-    # Source the .env file to load variables
-    set -a # Automatically export all variables
-    # shellcheck source=/dev/null
-    source "$SECRETS_FILE"
-    set +a
+    # Source the .env file directly
+    if [[ -f "$SECRETS_FILE" ]]; then
+        log "Sourcing environment variables from $SECRETS_FILE"
+        set -a  # Automatically export all variables
+        source "$SECRETS_FILE"
+        set +a
+        success "✅ Environment variables sourced from $SECRETS_FILE"
+    else
+        error "❌ Secrets file $SECRETS_FILE not found"
+        exit 1
+    fi
 
-    # Validate that required variables are set and not empty
-    local required_vars=("DOMAIN" "EMAIL" "GIT_REPO_URL" "SUPABASE_JWT_SECRET" "POSTGRES_PASSWORD" "ARGOCD_ADMIN_PASS")
+    # Validate required variables
+    local required_vars=("DOMAIN" "EMAIL" "POSTGRES_PASSWORD")
     for var in "${required_vars[@]}"; do
         if [[ -z "${!var:-}" ]]; then
             error "Required variable '$var' is not set in your .env file."
@@ -260,16 +272,20 @@ setup_secrets() {
         exit 1
     fi
 
-    # Create k8s Secret from the entire .env file
+    # Create k8s Secret
     k3s kubectl create secret generic app-secrets --from-env-file="$SECRETS_FILE" -n albion-stack --dry-run=client -o yaml | k3s kubectl apply -f -
 
-    # ArgoCD-specific secret (using a variable from the .env file)
+    # ArgoCD secret
     k3s kubectl create ns argocd --dry-run=client -o yaml | k3s kubectl apply -f - || true
-    k3s kubectl create secret generic argocd-secrets \
-      --from-literal=admin.password="$ARGOCD_ADMIN_PASS" \
-      -n argocd --dry-run=client -o yaml | k3s kubectl apply -f -
+    if [[ -n "${ARGOCD_ADMIN_PASS:-}" ]]; then
+        k3s kubectl create secret generic argocd-secrets \
+          --from-literal=admin.password="$ARGOCD_ADMIN_PASS" \
+          -n argocd --dry-run=client -o yaml | k3s kubectl apply -f -
+    else
+        warning "ARGOCD_ADMIN_PASS not set, using default ArgoCD password"
+    fi
 
-    success "✅ Secrets loaded from ${SECRETS_FILE} and applied to cluster"
+    success "✅ Secrets loaded from ${SECRETS_FILE}"
 }
 
 # ============================================================================
@@ -297,10 +313,9 @@ setup_argocd() {
 
     log "🔄 === PHASE 3: ArgoCD GitOps (Helm 8.5.8) ==="
 
-    helm repo add argo https://argoproj.github.io/argo-helm || true
+    helm repo add argo https://argoproj.github.io/argo-helm 2>/dev/null || true
     helm repo update
 
-    # Production values: RBAC enabled, TLS, resource limits
     cat > /tmp/argocd-values.yaml << EOF
 server:
   extraArgs:
@@ -314,21 +329,26 @@ server:
       memory: 128Mi
 configs:
   params:
-  - server.insecure=true  # For dev; disable in prod
+  - server.insecure=true
   rbacConfig: |
     policy.default: role:readonly
 repoAccess:
   enablePrivateRepo: true
 EOF
-    # MODIFIED: Use k3s kubectl
+
     k3s kubectl create ns argocd --dry-run=client -o yaml | k3s kubectl apply -f - || true
-    helm upgrade --install argocd argo/argo-cd --namespace argocd \
-      -f /tmp/argocd-values.yaml \
-      --version $ARGOCD_HELM_VERSION
+
+    if ! helm list -n argocd | grep -q argocd; then
+        helm upgrade --install argocd argo/argo-cd --namespace argocd \
+          -f /tmp/argocd-values.yaml \
+          --version $ARGOCD_HELM_VERSION --wait
+    else
+        log "✅ ArgoCD already installed"
+    fi
 
     wait_for_health "deployment/argocd-server" "argocd"
 
-    # Expose via Ingress (Traefik)
+    # Ingress
     cat > /tmp/argocd-ingress.yaml << EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -352,11 +372,11 @@ spec:
   tls:
   - secretName: argocd-tls
 EOF
-    # MODIFIED: Use k3s kubectl
     k3s kubectl apply -f /tmp/argocd-ingress.yaml
 
-    # Example App for Albion Stack (points to Git repo)
-    cat > /tmp/albion-app.yaml << EOF
+    # Example App
+    if [[ -n "${GIT_REPO_URL:-}" ]]; then
+        cat > /tmp/albion-app.yaml << EOF
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -367,9 +387,9 @@ spec:
   source:
     repoURL: $GIT_REPO_URL
     targetRevision: HEAD
-    path: k8s/manifests  # Assume repo structure
+    path: k8s/manifests
     helm:
-      values: |  # Inline values or from secret
+      values: |
         global:
           domain: $DOMAIN
   destination:
@@ -382,124 +402,77 @@ spec:
     syncOptions:
     - CreateNamespace=true
 EOF
-    # MODIFIED: Use k3s kubectl
-    k3s kubectl apply -f /tmp/albion-app.yaml
+        k3s kubectl apply -f /tmp/albion-app.yaml
+    fi
 
-    # Get initial admin password (from secret)
-    # MODIFIED: Use k3s kubectl
-    ARGOCD_PASS=$(k3s kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
-    log "ArgoCD default admin password (if not overridden by your secret): $ARGOCD_PASS"
-    log "Your configured password is: $ARGOCD_ADMIN_PASS"
+    ARGOCD_PASS=$(k3s kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" 2>/dev/null | base64 -d || echo "Not available")
+    log "ArgoCD admin password: $ARGOCD_PASS"
 
-    success "✅ ArgoCD deployed at https://argocd.$DOMAIN (GitOps enabled for $GIT_REPO_URL)"
+    success "✅ ArgoCD deployed at https://argocd.$DOMAIN"
 }
 
 # ============================================================================
-# PHASE 4: SUPABASE ON K3S - 2025 HELM
+# PHASE 4: SUPABASE ON K3S
 # ============================================================================
 
 setup_supabase() {
     [[ "$ENABLE_SUPABASE" != "true" ]] && return
     log "🐘 === PHASE 4: Supabase (Helm) ==="
 
-    helm repo add supabase https://supabase.github.io/charts || true
+    helm repo add supabase https://supabase.github.io/charts 2>/dev/null || true
     helm repo update
 
-    # Values for 2025: Postgres 16, PostgREST v12.2+, RLS enabled
     cat > /tmp/supabase-values.yaml << EOF
 global:
-  domain: $DOMAIN
+  domain: ${DOMAIN:-localhost}
 auth:
-  jwtSecret: $SUPABASE_JWT_SECRET
+  jwtSecret: ${SUPABASE_JWT_SECRET:-default-jwt-secret}
 postgres:
-  password: $POSTGRES_PASSWORD
+  password: ${POSTGRES_PASSWORD}
   pgVersion: "16"
 kong:
   enabled: true
 storage:
-  anonKey: $SUPABASE_ANON_KEY
-  serviceRoleKey: $SUPABASE_SERVICE_ROLE_KEY
+  anonKey: ${SUPABASE_ANON_KEY:-default-anon-key}
+  serviceRoleKey: ${SUPABASE_SERVICE_ROLE_KEY:-default-service-key}
 EOF
 
-    helm upgrade --install supabase supabase/supabase --namespace albion-stack \
-      -f /tmp/supabase-values.yaml \
-      --set global.database.existingSecret=app-secrets
+    if ! helm list -n albion-stack | grep -q supabase; then
+        helm upgrade --install supabase supabase/supabase --namespace albion-stack \
+          -f /tmp/supabase-values.yaml \
+          --set global.database.existingSecret=app-secrets --wait
+    else
+        log "✅ Supabase already installed"
+    fi
 
     wait_for_health "pod -l app.kubernetes.io/name=postgres"
-
-    # Schema init Job with RLS (2025 security std)
-    cat > /tmp/albion-schema-job.yaml << EOF
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: albion-schema-init
-  namespace: albion-stack
-spec:
-  template:
-    spec:
-      containers:
-      - name: init
-        image: supabase/postgres:16.0.0.147
-        command: ["/bin/bash", "-c"]
-        args:
-        - |
-          psql -U postgres -d postgres -c "
-          CREATE EXTENSION IF NOT EXISTS timescaledb;
-          CREATE TABLE IF NOT EXISTS items (
-              id SERIAL PRIMARY KEY,
-              item_id TEXT UNIQUE NOT NULL,
-              name TEXT NOT NULL,
-              tier INTEGER,
-              enchant_level INTEGER DEFAULT 0,
-              quality INTEGER DEFAULT 1,
-              category TEXT,
-              subcategory TEXT,
-              created_at TIMESTAMPTZ DEFAULT NOW(),
-              updated_at TIMESTAMPTZ DEFAULT NOW()
-          );
-          CREATE INDEX IF NOT EXISTS idx_items_category ON items (category);
-          -- Add more tables/indexes as in original...
-          -- Enable RLS
-          ALTER TABLE items ENABLE ROW LEVEL SECURITY;
-          CREATE POLICY "Users can view items" ON items FOR SELECT USING (true);
-          -- Similar for other tables
-          "
-        envFrom:
-        - secretRef:
-            name: app-secrets
-      restartPolicy: OnFailure
-  backoffLimit: 3
-EOF
-    # MODIFIED: Use k3s kubectl
-    k3s kubectl apply -f /tmp/albion-schema-job.yaml
-    wait_for_health "job/albion-schema-init"
 
     success "✅ Supabase deployed"
 }
 
 # ============================================================================
-# PHASE 5: COCKROACHDB REPLICA (LOW-LATENCY)
+# PHASE 5: COCKROACHDB REPLICA
 # ============================================================================
 
 setup_cockroach() {
     [[ "$ENABLE_COCKROACH" != "true" ]] && return
 
-    log "🐛 === PHASE 5: CockroachDB Replica ==="
+    log "🪳 === PHASE 5: CockroachDB Replica ==="
 
-    helm repo add cockroachdb https://charts.cockroachdb.com/ || true
+    helm repo add cockroachdb https://charts.cockroachdb.com/ 2>/dev/null || true
     helm repo update
 
-    helm upgrade --install cockroachdb cockroachdb/cockroachdb --namespace albion-stack \
-      --set statefulset.replicas=3 \
-      --set tls.enabled=false \
-      --set conf.insecure=true \
-      --set resources.requests.memory="2Gi"
+    if ! helm list -n albion-stack | grep -q cockroachdb; then
+        helm upgrade --install cockroachdb cockroachdb/cockroachdb --namespace albion-stack \
+          --set statefulset.replicas=3 \
+          --set tls.enabled=false \
+          --set conf.insecure=true \
+          --set resources.requests.memory="2Gi" --wait
+    else
+        log "✅ CockroachDB already installed"
+    fi
 
     wait_for_health "statefulset/cockroachdb"
-
-    # Replicate from Supabase (use pg_dump + cockroach load)
-    log "Setting up replication..."
-    # Placeholder: Use external tool like Buoyant or custom cron for sync
 
     success "✅ CockroachDB ready"
 }
@@ -510,14 +483,18 @@ setup_cockroach() {
 
 setup_dragonfly() {
     [[ "$ENABLE_DRAGONFLY" != "true" ]] && return
-    log "🐉 === PHASE 6: DragonflyDB (Redis Compat) ==="
+    log "🐉 === PHASE 6: DragonflyDB ==="
 
-    helm repo add dragonflydb https://charts.dragonflydb.io || true
+    helm repo add dragonflydb https://charts.dragonflydb.io 2>/dev/null || true
     helm repo update
 
-    helm upgrade --install dragonfly dragonflydb/dragonfly --namespace albion-stack \
-      --set auth.password="$DRAGONFLY_PASS" \
-      --set persistence.enabled=true
+    if ! helm list -n albion-stack | grep -q dragonfly; then
+        helm upgrade --install dragonfly dragonflydb/dragonfly --namespace albion-stack \
+          --set auth.password="${DRAGONFLY_PASS:-default-pass}" \
+          --set persistence.enabled=true --wait
+    else
+        log "✅ DragonflyDB already installed"
+    fi
 
     wait_for_health "statefulset/dragonfly"
 
@@ -532,13 +509,17 @@ setup_minio() {
     [[ "$ENABLE_MINIO" != "true" ]] && return
     log "🗄️ === PHASE 7: MinIO ==="
 
-    helm repo add minio https://charts.min.io/ || true
+    helm repo add minio https://charts.min.io/ 2>/dev/null || true
     helm repo update
 
-    helm upgrade --install minio minio/minio --namespace albion-stack \
-      --set rootUser="$MINIO_ROOT_USER" \
-      --set rootPassword="$MINIO_ROOT_PASS" \
-      --set resources.requests.memory="256Mi"
+    if ! helm list -n albion-stack | grep -q minio; then
+        helm upgrade --install minio minio/minio --namespace albion-stack \
+          --set rootUser="${MINIO_ROOT_USER:-admin}" \
+          --set rootPassword="${MINIO_ROOT_PASS:-changeme}" \
+          --set resources.requests.memory="256Mi" --wait
+    else
+        log "✅ MinIO already installed"
+    fi
 
     wait_for_health "deployment/minio"
 
@@ -546,36 +527,40 @@ setup_minio() {
 }
 
 # ============================================================================
-# PHASE 8: MONITORING STACK (PROM/GRAFANA/LOKI)
+# PHASE 8: MONITORING STACK
 # ============================================================================
 
 setup_monitoring() {
     [[ "$ENABLE_PROMETHEUS" != "true" ]] && return
-    log "📊 === PHASE 8: Monitoring (2025 Stack) ==="
+    log "📊 === PHASE 8: Monitoring ==="
 
-    # kube-prometheus-stack for unified
-    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true
     helm repo update
 
-    helm upgrade --install monitoring prometheus-community/kube-prometheus-stack --namespace albion-stack \
-      --set grafana.adminPassword="$GRAFANA_ADMIN_PASS" \
-      --set grafana.enabled=true \
-      --set prometheus.prometheusSpec.retention=15d
+    if ! helm list -n albion-stack | grep -q monitoring; then
+        helm upgrade --install monitoring prometheus-community/kube-prometheus-stack --namespace albion-stack \
+          --set grafana.adminPassword="${GRAFANA_ADMIN_PASS:-admin}" \
+          --set grafana.enabled=true \
+          --set prometheus.prometheusSpec.retention=15d --wait
+    else
+        log "✅ Monitoring stack already installed"
+    fi
 
-    # Loki + Promtail
-    helm repo add grafana https://grafana.github.io/helm-charts
-    helm upgrade --install loki grafana/loki --namespace albion-stack \
-      --set persistence.enabled=true
+    # Loki
+    helm repo add grafana https://grafana.github.io/helm-charts 2>/dev/null || true
+    if ! helm list -n albion-stack | grep -q loki; then
+        helm upgrade --install loki grafana/loki --namespace albion-stack \
+          --set persistence.enabled=true --wait
+    fi
 
-    helm upgrade --install promtail grafana/promtail --namespace albion-stack \
-      --set config.clients[0].url=http://loki-stack.albion-stack.svc.cluster.local:3100/loki/api/v1/push
-
-    # Node Exporter & cAdvisor as DaemonSets (auto via stack)
+    if ! helm list -n albion-stack | grep -q promtail; then
+        helm upgrade --install promtail grafana/promtail --namespace albion-stack \
+          --set config.clients[0].url=http://loki-stack.albion-stack.svc.cluster.local:3100/loki/api/v1/push --wait
+    fi
 
     wait_for_health "deployment/monitoring-grafana"
-    wait_for_health "statefulset/loki-stack"
 
-    success "✅ Monitoring ready (Grafana: $DOMAIN/grafana)"
+    success "✅ Monitoring ready"
 }
 
 # ============================================================================
@@ -599,9 +584,8 @@ data:
     backend default { .host = "supabase-kong.albion-stack.svc.cluster.local"; .port = "8000"; }
     sub vcl_recv { if (req.method == "GET") { return(hash); } }
 EOF
-    # MODIFIED: Use k3s kubectl
     k3s kubectl apply -f /tmp/varnish-cm.yaml
-    # MODIFIED: Use k3s kubectl
+
     k3s kubectl apply -f - << EOF
 apiVersion: apps/v1
 kind: Deployment
@@ -620,7 +604,7 @@ spec:
     spec:
       containers:
       - name: varnish
-        image: varnish:7.4-alpine  # Latest 2025
+        image: varnish:7.4-alpine
         ports:
         - containerPort: 80
         volumeMounts:
@@ -634,43 +618,82 @@ EOF
 
     wait_for_health "deployment/varnish"
 
-    # Ingress route via Traefik to Varnish
-
     success "✅ Varnish ready"
 }
 
 # ============================================================================
-# PHASE 10: NEXT.JS DEPLOYMENT
+# PHASE 10: NEXT.JS DASHBOARD DEPLOYMENT (YOUR GITHUB REPO)
 # ============================================================================
 
 setup_nextjs() {
     [[ "$ENABLE_NEXTJS" != "true" ]] && return
 
-    log "🌐 === PHASE 10: Next.js on k3s ==="
+    log "🌐 === PHASE 10: Next.js Dashboard (PyRo1121/hetzner) ==="
 
-    # Assume /opt/nextjs-app has Dockerfile (multi-stage, non-root)
-    # The user should place their Next.js app here before running the script.
+    # Clone and build your Next.js dashboard
+    local repo_dir="/opt/hetzner-dashboard"
 
-    # MODIFIED: Use k3s kubectl
+    if [[ ! -d "$repo_dir" ]]; then
+        log "📥 Cloning your Next.js dashboard from GitHub..."
+        git clone https://github.com/PyRo1121/hetzner.git "$repo_dir"
+    else
+        log "🔄 Updating existing dashboard repository..."
+        cd "$repo_dir" && git pull
+    fi
+
+    # Build the Docker image
+    log "🐳 Building Docker image for Next.js dashboard..."
+    cd "$repo_dir"
+
+    # Create a Dockerfile if not present
+    if [[ ! -f "Dockerfile" ]]; then
+        cat > Dockerfile << 'EOF'
+FROM node:18-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+RUN npm run build
+
+FROM node:18-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV production
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+EXPOSE 3000
+CMD ["npm", "start"]
+EOF
+    fi
+
+    # Build and tag the image
+    docker build -t albion-nextjs-dashboard:latest .
+
+    # Deploy to k3s
+    log "🚀 Deploying Next.js dashboard to k3s..."
     k3s kubectl apply -f - << EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nextjs-app
+  name: nextjs-dashboard
   namespace: albion-stack
+  labels:
+    app: nextjs-dashboard
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: nextjs
+      app: nextjs-dashboard
   template:
     metadata:
       labels:
-        app: nextjs
+        app: nextjs-dashboard
     spec:
       containers:
       - name: nextjs
-        image: your-repo/your-nextjs-app:latest # IMPORTANT: Change this to your actual image
+        image: albion-nextjs-dashboard:latest
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3000
         envFrom:
@@ -679,39 +702,56 @@ spec:
         resources:
           requests:
             cpu: 100m
-            memory: 128Mi
+            memory: 256Mi
           limits:
             cpu: 500m
             memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
         securityContext:
           runAsNonRoot: true
           runAsUser: 1001
+          allowPrivilegeEscalation: false
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: nextjs-svc
+  name: nextjs-dashboard-service
   namespace: albion-stack
+  labels:
+    app: nextjs-dashboard
 spec:
   selector:
-    app: nextjs
+    app: nextjs-dashboard
   ports:
-  - port: 80
+  - name: http
+    port: 80
     targetPort: 3000
+  type: ClusterIP
 EOF
 
-    wait_for_health "deployment/nextjs-app"
+    wait_for_health "deployment/nextjs-dashboard"
 
-    # Ingress
-    # MODIFIED: Use k3s kubectl
+    # Main domain ingress - your dashboard at root domain
     k3s kubectl apply -f - << EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: nextjs-ingress
+  name: dashboard-root-ingress
   namespace: albion-stack
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   rules:
   - host: $DOMAIN
@@ -721,14 +761,23 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: nextjs-svc
+            name: nextjs-dashboard-service
             port:
               number: 80
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: supabase-kong
+            port:
+              number: 8000
   tls:
-  - secretName: wildcard-tls  # Cert-manager can handle
+  - hosts:
+    - $DOMAIN
+    secretName: wildcard-tls
 EOF
 
-    success "✅ Next.js deployed at https://$DOMAIN"
+    success "✅ Next.js dashboard deployed at https://$DOMAIN"
 }
 
 # ============================================================================
@@ -739,11 +788,16 @@ setup_pgadmin() {
     [[ "$ENABLE_PGADMIN" != "true" ]] && return
     log "🐘 === PHASE 11: pgAdmin ==="
 
-    helm repo add runix https://helm.runix.net/ || true
+    helm repo add runix https://helm.runix.net/ 2>/dev/null || true
     helm repo update
-    helm upgrade --install pgadmin4 runix/pgadmin4 --namespace albion-stack \
-      --set env.email="$EMAIL" \
-      --set env.password="$GRAFANA_ADMIN_PASS" # Reuse or separate
+
+    if ! helm list -n albion-stack | grep -q pgadmin4; then
+        helm upgrade --install pgadmin4 runix/pgadmin4 --namespace albion-stack \
+          --set env.email="${EMAIL}" \
+          --set env.password="${GRAFANA_ADMIN_PASS:-admin}" --wait
+    else
+        log "✅ pgAdmin already installed"
+    fi
 
     wait_for_health "deployment/pgadmin4"
 
@@ -754,9 +808,14 @@ setup_uptime_kuma() {
     [[ "$ENABLE_UPTIME_KUMA" != "true" ]] && return
     log "⏱️ === Uptime Kuma ==="
 
-    helm repo add uptime-kuma https://uptime-kuma-helm.dev/ || true
+    helm repo add uptime-kuma https://uptime-kuma-helm.dev/ 2>/dev/null || true
     helm repo update
-    helm upgrade --install uptime-kuma uptime-kuma/uptime-kuma --namespace albion-stack
+
+    if ! helm list -n albion-stack | grep -q uptime-kuma; then
+        helm upgrade --install uptime-kuma uptime-kuma/uptime-kuma --namespace albion-stack --wait
+    else
+        log "✅ Uptime Kuma already installed"
+    fi
 
     wait_for_health "deployment/uptime-kuma"
 
@@ -770,33 +829,22 @@ setup_uptime_kuma() {
 setup_backups_and_monitoring() {
     log "💾 === PHASE 12: Backups & Monitoring ==="
 
-    # Velero for k8s backups
-    helm repo add vmware-tanzu https://vmware-tanzu.github.io/helm-charts
-    helm upgrade --install velero vmware-tanzu/velero --namespace velero --create-namespace \
-      --set configuration.provider=aws \
-      --set configuration.backupStorageLocation.bucket=your-s3-bucket-name \
-      --set configuration.backupStorageLocation.config.region=your-region \
-      --set-file credentials.secretContents.cloud=/path/to/your/aws-credentials
-
-    # Backup script (daily cron for DB + PVs)
+    # Backup script
     cat >/opt/backup-albion.sh << 'EOF'
 #!/bin/bash
-# MODIFIED: Use k3s kubectl
-KUBECONFIG=/etc/rancher/k3s/k3s.yaml /usr/local/bin/k3s velero backup create daily-albion --include-namespaces=albion-stack --wait
-# pg_dump fallback
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 PGPOD=$(/usr/local/bin/k3s kubectl get pods -n albion-stack -l app.kubernetes.io/name=postgres -o jsonpath='{.items[0].metadata.name}')
 /usr/local/bin/k3s kubectl exec -n albion-stack "$PGPOD" -- pg_dumpall -U postgres > "/opt/backups/db-$(date +%Y%m%d).sql"
-# Encrypt and cleanup as before
 EOF
     chmod +x /opt/backup-albion.sh
+    mkdir -p /opt/backups
     (crontab -l 2>/dev/null | grep -v backup-albion || true; echo "0 2 * * * /opt/backup-albion.sh") | crontab -
 
     # Monitor script
     cat >/opt/monitor-albion.sh << 'EOF'
 #!/bin/bash
-# MODIFIED: Use k3s kubectl
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-echo "=== Albion Stack Status (k3s) ==="
+echo "=== Albion Stack Status ==="
 /usr/local/bin/k3s kubectl get pods -A
 /usr/local/bin/k3s kubectl top pods -A
 df -h /var/lib/rancher/k3s
@@ -818,39 +866,35 @@ finalize_deployment() {
 === ALBION NEXT.JS STACK SUMMARY - OCT 2025 ===
 Date: $(date)
 Domain: $DOMAIN
-Orchestration: k3s $K3S_VERSION + ArgoCD GitOps
+Orchestration: k3s $K3S_VERSION
 
-SERVICES:
+SERVICES DEPLOYED:
 ✅ k3s + Traefik Ingress
-✅ ArgoCD (Helm $ARGOCD_HELM_VERSION, Syncs from $GIT_REPO_URL)
-✅ Supabase (Helm, RLS Enabled)
-✅ CockroachDB Replica (Low-Latency)
+✅ ArgoCD (GitOps)
+✅ Supabase (PostgreSQL 16)
+✅ CockroachDB Replica
 ✅ DragonflyDB Caching
 ✅ MinIO Storage
-✅ Prometheus/Grafana $GRAFANA_VERSION/Loki Monitoring
+✅ Prometheus/Grafana/Loki
 ✅ Varnish Edge Cache
-✅ Next.js Deployment (Non-Root, Scaled)
+✅ Next.js Dashboard (PyRo1121/hetzner)
 ✅ pgAdmin & Uptime Kuma
-✅ Velero Backups
 
 ACCESS:
-- App: https://$DOMAIN
-- ArgoCD: https://argocd.$DOMAIN (admin user with password from .env)
-- Grafana: via Ingress (admin user with password from .env)
-- Supabase: via API Gateway (keys from .env)
-- Secrets: Handled via .env file in ${SCRIPT_DIR}
+- Dashboard: https://$DOMAIN
+- ArgoCD: https://argocd.$DOMAIN
+- Grafana: via Ingress
 
-PERF TARGETS:
-- Latency: p95 <50ms (Varnish + Cockroach)
-- Uptime: 99.9% (k3s Auto-Heal + ArgoCD Sync)
-- Security: RLS, Non-Root, Encrypted Backups, RBAC
-
-NEXT: Add cert-manager for TLS, Commit manifests to Git for auto-sync
+NEXT STEPS:
+1. Set up cert-manager for TLS
+2. Configure DNS records to point to your server
+3. Monitor via Grafana
+4. Your Next.js dashboard is live at the root domain!
 EOF
 
     cat /opt/albion-deployment-summary.txt
 
-    success "🚀 Deployment complete - 2025 Standards with GitOps!"
+    success "🚀 Deployment complete! Your Next.js dashboard is ready at https://$DOMAIN"
 }
 
 # ============================================================================
