@@ -456,13 +456,17 @@ setup_minio() {
     # Create MinIO directories
     mkdir -p /opt/minio/data /opt/minio/config
 
+    # Generate MinIO credentials
+    MINIO_ROOT_USER="minioadmin"
+    MINIO_ROOT_PASSWORD=$(openssl rand -hex 16)
+    
     # Start MinIO container
     log "Starting MinIO server..."
     docker run -d \
         --name minio \
         --network host \
-        -e MINIO_ROOT_USER=minioadmin \
-        -e MINIO_ROOT_PASSWORD=$(openssl rand -hex 16) \
+        -e MINIO_ROOT_USER=$MINIO_ROOT_USER \
+        -e MINIO_ROOT_PASSWORD=$MINIO_ROOT_PASSWORD \
         -v /opt/minio/data:/data \
         -v /opt/minio/config:/root/.minio \
         minio/minio:RELEASE.2024-10-29T16-01-48Z server /data --console-address ":9001"
@@ -481,12 +485,14 @@ setup_minio() {
     sleep 5  # Give MinIO time to fully start
 
     # Configure MinIO client
-    wget -q https://dl.min.io/client/mc/release/linux-amd64/mc
-    chmod +x mc
-    mv mc /usr/local/bin/
+    if ! command -v mc &> /dev/null; then
+        wget -q https://dl.min.io/client/mc/release/linux-amd64/mc
+        chmod +x mc
+        mv mc /usr/local/bin/
+    fi
 
-    # Configure MinIO alias
-    /usr/local/bin/mc alias set local http://localhost:9000 minioadmin "$(docker exec minio cat /proc/1/root/.minio/config.json | jq -r '.credential.access_key + ":" + .credential.secret_key' 2>/dev/null || echo 'minioadmin:password')"
+    # Configure MinIO alias with the correct credentials
+    /usr/local/bin/mc alias set local http://localhost:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD
 
     # Create buckets
     /usr/local/bin/mc mb local/albion-uploads || true
