@@ -513,8 +513,14 @@ setup_caddy() {
 
     # Install Caddy
     log "Installing Caddy $CADDY_VERSION..."
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | tee /etc/apt/trusted.gpg.d/caddy-stable.asc
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+    
+    # Import GPG key properly
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    
+    # Add repository with proper GPG key reference
+    echo "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" | tee /etc/apt/sources.list.d/caddy-stable.list
+    
+    # Update package list and install Caddy
     /usr/bin/apt-get update
     /usr/bin/apt-get install -y caddy
 
