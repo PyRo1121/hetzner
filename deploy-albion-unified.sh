@@ -241,22 +241,73 @@ setup_k3s() {
 # SECRETS MANAGEMENT - 2025 STANDARDS (FIXED)
 # ============================================================================
 
+# Helper function to validate .env file format
+validate_env_file() {
+    local env_file="$1"
+    local line_num=0
+    
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        ((line_num++))
+        
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        
+        # Check for proper variable format
+        if ! [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+            error "Line $line_num: Invalid format - $line"
+            error "Expected format: VARIABLE_NAME=value"
+            return 1
+        fi
+        
+        # Extract value part after =
+        local value="${line#*=}"
+        
+        # Check if value contains special characters but isn't quoted
+        if [[ "$value" =~ [\$\`\"\\\!\#\%\^\&\*\(\)\|\<\>\?\;] ]] && ! [[ "$value" =~ ^[\"\'].*[\"\']$ ]]; then
+            error "Line $line_num: Unquoted special characters detected"
+            error "Please quote the value: ${line%%=*}=\"$value\""
+            return 1
+        fi
+    done < "$env_file"
+    
+    return 0
+}
+
 setup_secrets() {
     log "🔐 === Secrets Setup from local .env file ==="
 
     SECRETS_FILE="${SCRIPT_DIR}/.env"
 
-    # Source the .env file directly
-    if [[ -f "$SECRETS_FILE" ]]; then
-        log "Sourcing environment variables from $SECRETS_FILE"
-        set -a  # Automatically export all variables
-        source "$SECRETS_FILE"
-        set +a
-        success "✅ Environment variables sourced from $SECRETS_FILE"
-    else
+    # Check if .env file exists
+    if [[ ! -f "$SECRETS_FILE" ]]; then
         error "❌ Secrets file $SECRETS_FILE not found"
+        log "Please create a .env file based on scripts/infra/.env.example"
         exit 1
     fi
+
+    # Validate .env file format before sourcing
+    log "Validating .env file format..."
+    if ! validate_env_file "$SECRETS_FILE"; then
+        error "❌ Invalid .env file format. Please check for unquoted special characters."
+        exit 1
+    fi
+
+    # Source the .env file with error handling
+    log "Sourcing environment variables from $SECRETS_FILE"
+    set -a  # Automatically export all variables
+    
+    # Use a safer method to source the file
+    if ! (set -e; source "$SECRETS_FILE"); then
+        error "❌ Failed to source .env file. Check for syntax errors."
+        log "Common issues:"
+        log "  - Unquoted values with special characters (use quotes: VAR=\"value\")"
+        log "  - Missing = signs"
+        log "  - Invalid variable names"
+        exit 1
+    fi
+    
+    set +a
+    success "✅ Environment variables sourced from $SECRETS_FILE"
 
     # Validate required variables
     local required_vars=("DOMAIN" "EMAIL" "POSTGRES_PASSWORD")
