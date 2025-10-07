@@ -25,7 +25,7 @@ err() { echo "[hcloud-fw:ERROR] $*" >&2; }
 export PATH="/usr/local/bin:$PATH"
 
 # Minimum hcloud CLI version required for --rules-from support
-HC_VER="v1.42.0"
+HC_VER="v1.53.0"
 HCLOUD_API="https://api.hetzner.cloud/v1"
 
 require_var() {
@@ -104,6 +104,11 @@ install_hcloud_cli() {
   rm -rf "$TMP"
   # Ensure new binary is picked up
   hash -r
+  # Re-validate CLI support post-install
+  if ! hcloud firewall create --help 2>&1 | grep -q -- "--rules-from"; then
+    err "Installed CLI still lacks --rules-from support"; exit 1
+  fi
+  log "hcloud CLI now supports --rules-from"
 }
 
 # ---- REST API helpers (fallback for legacy CLI) ----
@@ -116,31 +121,47 @@ api_get_firewall_id_by_name() {
 
 api_create_firewall() {
   local name="$1"; local rules_json_array="$2"; local server_id="$3"
-  local body
+  local body response fw_id
   body=$(jq -n --arg name "$name" --argjson rules $rules_json_array --arg sid "$server_id" '{
     name: $name,
     rules: $rules,
     apply_to: [ { server: { id: ($sid|tonumber) } } ]
   }')
-  curl -sS -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
-    -d "$body" "$HCLOUD_API/firewalls" \
-    | jq -r '.firewall.id'
+  response=$(curl -sS -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
+    -d "$body" "$HCLOUD_API/firewalls")
+  if [[ $? -ne 0 ]]; then err "Curl failed during firewall creation"; exit 1; fi
+  fw_id=$(echo "$response" | jq -r '.firewall.id // empty')
+  if [[ -z "$fw_id" ]]; then
+    log "API create response: $response"
+    err "Failed to create firewall: invalid response (check token permissions)"; exit 1
+  fi
+  echo "$fw_id"
 }
 
 api_set_firewall_rules() {
   local fw_id="$1"; local rules_json_array="$2"
-  local body
+  local body response
   body=$(jq -n --argjson rules $rules_json_array '{ rules: $rules }')
-  curl -sS -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
-    -d "$body" "$HCLOUD_API/firewalls/$fw_id/actions/set_rules" >/dev/null
+  response=$(curl -sS -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
+    -d "$body" "$HCLOUD_API/firewalls/$fw_id/actions/set_rules")
+  if [[ $? -ne 0 ]]; then err "Curl failed during set rules"; exit 1; fi
+  if [[ "$(echo "$response" | jq -r '.action.id // empty')" == "empty" ]]; then
+    log "API set rules response: $response"
+    err "Failed to set firewall rules: invalid response"; exit 1
+  fi
 }
 
 api_apply_firewall_to_server() {
   local fw_id="$1"; local server_id="$2"
-  local body
+  local body response
   body=$(jq -n --arg sid "$server_id" '{ apply_to: [ { server: { id: ($sid|tonumber) } } ] }')
-  curl -sS -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
-    -d "$body" "$HCLOUD_API/firewalls/$fw_id/actions/apply_to_resources" >/dev/null
+  response=$(curl -sS -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
+    -d "$body" "$HCLOUD_API/firewalls/$fw_id/actions/apply_to_resources")
+  if [[ $? -ne 0 ]]; then err "Curl failed during apply to server"; exit 1; fi
+  if [[ "$(echo "$response" | jq -r '.action.id // empty')" == "empty" ]]; then
+    log "API apply response: $response"
+    err "Failed to apply firewall to server: invalid response"; exit 1
+  fi
 }
 
 main() {
