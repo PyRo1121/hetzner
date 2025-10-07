@@ -41,28 +41,46 @@ sudo apt update && sudo apt install -y \
 
 ### 1.2 Create Encrypted Secrets Storage
 ```bash
-# Create encrypted container for secrets
+# Create directory first
 sudo mkdir -p /opt/secure-secrets
-sudo fallocate -l 1G /opt/secure-secrets/container.img
-sudo cryptsetup luksFormat /opt/secure-secrets/container.img
-sudo cryptsetup open /opt/secure-secrets/container.img secrets-vol
-sudo mkfs.ext4 /dev/mapper/secrets-vol
-sudo mount /dev/mapper/secrets-vol /opt/secure-secrets
 
-# Set proper permissions
-sudo chown root:root /opt/secure-secrets
-sudo chmod 700 /opt/secure-secrets
+# Create the container file (1GB encrypted container)
+sudo fallocate -l 1G /opt/secure-secrets/container.img
+
+# Format with LUKS encryption
+sudo cryptsetup luksFormat /opt/secure-secrets/container.img
+# When prompted, enter a STRONG passphrase (32+ characters)
+
+# Open the encrypted container
+sudo cryptsetup open /opt/secure-secrets/container.img secrets-vol
+
+# Create filesystem on the encrypted volume
+sudo mkfs.ext4 /dev/mapper/secrets-vol
+
+# Mount the encrypted volume
+sudo mkdir -p /mnt/secure-secrets
+sudo mount /dev/mapper/secrets-vol /mnt/secure-secrets
+
+# Set proper permissions (root only)
+sudo chown root:root /mnt/secure-secrets
+sudo chmod 700 /mnt/secure-secrets
 ```
 
 ### 1.3 Install HashiCorp Vault (Secret Management)
 ```bash
-# Download and install Vault
-curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
-sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
-sudo apt update && sudo apt install vault
+# Install Vault via snap (Ubuntu 25.04 method)
+sudo snap install vault
 
 # Configure Vault for production
-sudo tee /etc/vault.d/vault.hcl > /dev/null <<EOF
+sudo mkdir -p /opt/vault/data /opt/vault/tls
+
+# Generate TLS certificates for Vault
+sudo openssl req -new -newkey rsa:4096 -days 365 -nodes -x509 \
+  -subj "/C=US/ST=State/L=City/O=Organization/CN=vault.pyro1121.com" \
+  -keyout /opt/vault/tls/vault.key \
+  -out /opt/vault/tls/vault.crt
+
+sudo tee /opt/vault/vault.hcl > /dev/null <<EOF
 storage "file" {
   path = "/opt/vault/data"
 }
@@ -79,16 +97,37 @@ cluster_addr = "https://vault.pyro1121.com:8201"
 ui = true
 EOF
 
+# Create systemd service for Vault
+sudo tee /etc/systemd/system/vault.service > /dev/null <<EOF
+[Unit]
+Description=HashiCorp Vault
+After=network.target
+
+[Service]
+Type=simple
+User=vault
+Group=vault
+ExecStart=/snap/bin/vault server -config=/opt/vault/vault.hcl
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Create vault user and set permissions
+sudo useradd --system --shell /bin/false vault
+sudo chown -R vault:vault /opt/vault
+
+# Initialize Vault
+sudo systemctl enable --now vault
+```
+
 # Initialize Vault
 sudo systemctl enable --now vault
 ```
 
 ### 1.4 Generate Hardware-Backed Keys
-```bash
-# Generate AES-256 key with hardware entropy
-sudo rngd -r /dev/urandom
-sudo openssl rand -hex 32 | sudo tee /opt/secure-secrets/master.key
-sudo chmod 600 /opt/secure-secrets/master.key
 
 # Create encrypted secrets database
 sudo tee /opt/secure-secrets/secrets.db > /dev/null <<EOF
