@@ -236,7 +236,7 @@ setup_supabase() {
 
     # Start Supabase services
     log "Starting Supabase services..."
-    retry_with_backoff 3 10 "docker compose up -d"
+    retry_with_backoff 3 10 docker compose up -d
 
     # Wait for services to be ready
     log "Waiting for Supabase services to be ready..."
