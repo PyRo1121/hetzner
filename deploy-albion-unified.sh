@@ -385,8 +385,6 @@ EOF
             log "Found $running_essential/4 essential Supabase services running, continuing..."
             success " Supabase deployment completed with $running_essential essential services"
         else
-            success " Supabase deployment completed with $running_essential essential services"
-        else
             log "Running deployment diagnostics..."
             echo "=== SYSTEM RESOURCES ==="
             free -h
