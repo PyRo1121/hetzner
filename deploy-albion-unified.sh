@@ -205,10 +205,20 @@ setup_supabase() {
     # Clone Supabase repository
     if [[ ! -d supabase ]]; then
         log "Cloning Supabase repository..."
-        retry_with_backoff 3 5 git clone $SUPABASE_REPO
+        retry_with_backoff 3 5 git clone https://github.com/supabase/supabase
+    else
+        log "Supabase directory already exists"
     fi
 
     cd supabase/docker
+
+    # Check if docker-compose.yml exists before proceeding
+    if [[ ! -f docker-compose.yml ]]; then
+        error "docker-compose.yml not found after cloning Supabase"
+        exit 1
+    fi
+
+    log "Supabase docker-compose.yml found, proceeding with configuration"
 
     # Generate production secrets
     log "Generating production secrets..."
@@ -230,41 +240,52 @@ setup_supabase() {
 
     # Fix common Supabase docker-compose.yml syntax errors
     if [[ -f docker-compose.yml ]]; then
-        log "Fixing common Supabase docker-compose.yml syntax issues..."
-        cp docker-compose.yml docker-compose.yml.original
+        log "Checking docker-compose.yml syntax..."
+        if ! docker compose config --quiet 2>/dev/null; then
+            log "docker-compose.yml has syntax errors, attempting automatic fix..."
+            cp docker-compose.yml docker-compose.yml.original
 
-        # Fix duplicate container_name keys (common Supabase issue)
-        # Remove duplicate container_name entries, keeping only the first one
-        awk '
-        BEGIN { in_service = 0; container_name_seen = 0 }
-        /^  [a-zA-Z][a-zA-Z0-9_-]*:/ {
-            in_service = 1
-            container_name_seen = 0
-            print
-            next
-        }
-        /^    container_name:/ {
-            if (!container_name_seen) {
-                container_name_seen = 1
+            # Try automatic fix for duplicate container_name keys
+            awk '
+            BEGIN { in_service = 0; container_name_seen = 0 }
+            /^  [a-zA-Z][a-zA-Z0-9_-]*:/ {
+                in_service = 1
+                container_name_seen = 0
                 print
+                next
             }
-            next
-        }
-        /^  [a-zA-Z]/ && in_service && !/^    / {
-            in_service = 0
-            container_name_seen = 0
-        }
-        { print }
-        ' docker-compose.yml > docker-compose.yml.fixed
+            /^    container_name:/ {
+                if (!container_name_seen) {
+                    container_name_seen = 1
+                    print
+                }
+                next
+            }
+            /^  [a-zA-Z]/ && in_service && !/^    / {
+                in_service = 0
+                container_name_seen = 0
+            }
+            { print }
+            ' docker-compose.yml > docker-compose.yml.fixed
 
-        mv docker-compose.yml.fixed docker-compose.yml
-
-        # Validate the fixed file
-        if docker compose config --quiet 2>/dev/null; then
-            log "✓ docker-compose.yml syntax fixed successfully"
+            # Test the fixed file
+            if docker compose config --quiet docker-compose.yml.fixed 2>/dev/null; then
+                mv docker-compose.yml.fixed docker-compose.yml
+                log "✓ docker-compose.yml syntax fixed successfully"
+            else
+                log "Automatic fix failed, trying alternative approach..."
+                # Download a known working version
+                curl -s https://raw.githubusercontent.com/supabase/supabase/master/docker/docker-compose.yml -o docker-compose.yml.fresh
+                if docker compose config --quiet docker-compose.yml.fresh 2>/dev/null; then
+                    mv docker-compose.yml.fresh docker-compose.yml
+                    log "✓ Downloaded fresh docker-compose.yml successfully"
+                else
+                    log "⚠ All fixes failed, using original file"
+                    cp docker-compose.yml.original docker-compose.yml
+                fi
+            fi
         else
-            log "⚠ docker-compose.yml still has issues, using original"
-            cp docker-compose.yml.original docker-compose.yml
+            log "✓ docker-compose.yml syntax is valid"
         fi
     fi
 
