@@ -6,7 +6,7 @@ metadata:
   labels:
     app: storage-api
     app.kubernetes.io/name: storage-api
-    app.kubernetes.io/version: "2025.10"
+    app.kubernetes.io/version: '2025.10'
     app.kubernetes.io/component: storage
     app.kubernetes.io/part-of: supabase-stack
 spec:
@@ -26,9 +26,9 @@ spec:
         app.kubernetes.io/name: storage-api
         app.kubernetes.io/component: storage
       annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "5000"
-        prometheus.io/path: "/metrics"
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '5000'
+        prometheus.io/path: '/metrics'
     spec:
       securityContext:
         runAsNonRoot: true
@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: storage-api
-          image: supabase/storage-api:v1.11.9  # Updated to latest stable version
+          image: supabase/storage-api:v1.11.9 # Updated to latest stable version
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -57,7 +57,7 @@ spec:
                   name: supabase-secrets
                   key: SERVICE_ROLE_KEY
             - name: POSTGREST_URL
-              value: "http://postgrest:3000"
+              value: 'http://postgrest:3000'
             - name: PGRST_JWT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -69,13 +69,13 @@ spec:
                   name: supabase-secrets
                   key: DB_URL
             - name: FILE_SIZE_LIMIT
-              value: "52428800"  # 50MB
+              value: '52428800' # 50MB
             - name: STORAGE_BACKEND
-              value: "s3"
+              value: 's3'
             - name: GLOBAL_S3_BUCKET
-              value: "supabase-storage"
+              value: 'supabase-storage'
             - name: REGION
-              value: "us-east-1"
+              value: 'us-east-1'
             - name: GLOBAL_S3_ENDPOINT
               valueFrom:
                 secretKeyRef:
@@ -92,15 +92,15 @@ spec:
                   name: supabase-secrets
                   key: S3_SECRET_KEY
             - name: TENANT_ID
-              value: "stub"
+              value: 'stub'
             - name: MULTITENANT
-              value: "false"
+              value: 'false'
             - name: LOG_LEVEL
-              value: "info"
+              value: 'info'
             - name: ENABLE_IMAGE_TRANSFORMATION
-              value: "true"
+              value: 'true'
             - name: IMGPROXY_URL
-              value: "http://imgproxy:8080"
+              value: 'http://imgproxy:8080'
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -112,11 +112,11 @@ spec:
                 - ALL
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "200m"
+              memory: '256Mi'
+              cpu: '200m'
             limits:
-              memory: "1Gi"
-              cpu: "1000m"
+              memory: '1Gi'
+              cpu: '1000m'
           readinessProbe:
             httpGet:
               path: /status
@@ -172,9 +172,9 @@ metadata:
     app.kubernetes.io/component: storage
     app.kubernetes.io/part-of: supabase-stack
   annotations:
-    prometheus.io/scrape: "true"
-    prometheus.io/port: "5000"
-    prometheus.io/path: "/metrics"
+    prometheus.io/scrape: 'true'
+    prometheus.io/port: '5000'
+    prometheus.io/path: '/metrics'
 spec:
   type: ClusterIP
   selector:

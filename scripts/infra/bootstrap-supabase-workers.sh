@@ -13,6 +13,7 @@
 #   TZ              Timezone (default: UTC)
 #   POSTGRES_PASSWORD  Password for Postgres (random if omitted)
 #   EXPOSE_MINIO_CONSOLE  Set to "true" to expose MinIO console on 9001 (default: false)
+#   ENABLE_K3S_MONITORING Set to "true" to install k3s + Prometheus/Grafana stack (default: false)
 #   DEBUG           Set to "true" for verbose logging (default: false)
 #
 # This script:
@@ -23,6 +24,7 @@
 # - Starts Supabase stack via docker compose
 # - Configures Caddy reverse proxy for TLS -> Supabase Kong gateway
 # - Sets up enhanced nightly Postgres dump with retention
+# - Optionally installs k3s + comprehensive monitoring stack (Prometheus, Grafana, Loki)
 
 set -euo pipefail
 
@@ -72,7 +74,7 @@ retry_with_backoff() {
   local delay=$2
   local command="${@:3}"
   local attempt=1
-  
+
   while [[ $attempt -le $max_attempts ]]; do
     if eval "$command"; then
       return 0
@@ -92,29 +94,29 @@ retry_with_backoff() {
 # System requirements check
 check_system_requirements() {
   log "Checking system requirements..."
-  
+
   # Check Ubuntu version
   if ! grep -q "Ubuntu" /etc/os-release; then
     err "This script requires Ubuntu 22.04 or 24.04 LTS"; exit 1
   fi
-  
+
   local ubuntu_version=$(grep VERSION_ID /etc/os-release | cut -d'"' -f2)
   if [[ "$ubuntu_version" != "22.04" && "$ubuntu_version" != "24.04" ]]; then
     log_warning "Untested Ubuntu version: $ubuntu_version. Recommended: 22.04 or 24.04"
   fi
-  
+
   # Check available disk space (minimum 10GB)
   local available_space=$(df / | awk 'NR==2 {print $4}')
   if [[ $available_space -lt 10485760 ]]; then  # 10GB in KB
     err "Insufficient disk space. At least 10GB required."; exit 1
   fi
-  
+
   # Check available memory (minimum 2GB)
   local available_memory=$(free -m | awk 'NR==2{print $2}')
   if [[ $available_memory -lt 2048 ]]; then
     log_warning "Low memory detected: ${available_memory}MB. Recommended: 4GB+"
   fi
-  
+
   log_success "System requirements check passed"
 }
 
@@ -142,12 +144,73 @@ generate_jwt() {
   printf '%s.%s.%s' "$h" "$b" "$s"
 }
 
+install_monitoring_stack() {
+    log "Installing comprehensive monitoring and analytics stack"
+
+    # Create monitoring namespace
+    kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+    # Add Helm repositories for monitoring
+    retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "helm repo add prometheus-community https://prometheus-community.github.io/helm-charts"
+    retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "helm repo add grafana https://grafana.github.io/helm-charts"
+    retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "helm repo update"
+
+    # Install kube-prometheus-stack (Prometheus + Grafana + AlertManager)
+    log "Installing Prometheus and Grafana stack..."
+    helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+        --version 77.13.0 \
+        --namespace monitoring \
+        --set prometheus.prometheusSpec.retention=30d \
+        --set prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.resources.requests.storage=50Gi \
+        --set grafana.adminPassword=admin123 \
+        --set grafana.persistence.enabled=true \
+        --set grafana.persistence.size=10Gi \
+        --set grafana.resources.requests.cpu=100m \
+        --set grafana.resources.requests.memory=128Mi \
+        --set grafana.resources.limits.cpu=500m \
+        --set grafana.resources.limits.memory=512Mi \
+        --set prometheus.prometheusSpec.resources.requests.cpu=200m \
+        --set prometheus.prometheusSpec.resources.requests.memory=512Mi \
+        --set prometheus.prometheusSpec.resources.limits.cpu=1000m \
+        --set prometheus.prometheusSpec.resources.limits.memory=2Gi \
+        --set alertmanager.alertmanagerSpec.resources.requests.cpu=10m \
+        --set alertmanager.alertmanagerSpec.resources.requests.memory=32Mi \
+        --wait --timeout=600s
+
+    # Install Loki for log aggregation
+    log "Installing Loki for log aggregation..."
+    helm upgrade --install loki grafana/loki \
+        --version 6.21.0 \
+        --namespace monitoring \
+        --set loki.auth_enabled=false \
+        --set loki.commonConfig.replication_factor=1 \
+        --set loki.storage.type=filesystem \
+        --set singleBinary.replicas=1 \
+        --set singleBinary.persistence.enabled=true \
+        --set singleBinary.persistence.size=20Gi \
+        --set monitoring.selfMonitoring.enabled=false \
+        --set monitoring.selfMonitoring.grafanaAgent.installOperator=false \
+        --wait --timeout=300s
+
+    # Install Promtail for log collection
+    log "Installing Promtail for log collection..."
+    helm upgrade --install promtail grafana/promtail \
+        --version 6.16.6 \
+        --namespace monitoring \
+        --set config.logLevel=info \
+        --set config.serverPort=3101 \
+        --set config.clients[0].url=http://loki:3100/loki/api/v1/push \
+        --wait --timeout=300s
+
+    log_success "Monitoring stack installed successfully"
+}
+
 install_k3s_helm() {
     log "Installing k3s and Helm (if needed for hybrid setup)"
-    
+
     # Install k3s with modern configuration
     retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.34.1+k3s1 sh -s - --disable traefik --disable servicelb --write-kubeconfig-mode 644"
-    
+
     # Wait for k3s to be ready
     local timeout=60
     local count=0
@@ -158,24 +221,24 @@ install_k3s_helm() {
         sleep 1
         ((count++))
     done
-    
+
     # Install Helm if not present
     if ! command -v helm &>/dev/null; then
         log "Installing Helm..."
         retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash"
     fi
-    
+
     log_success "k3s and Helm installed successfully"
 }
 
 install_ingress_certmanager() {
     log "Installing ingress-nginx and cert-manager with October 2025 standards"
-    
+
     # Add Helm repositories with retry
     retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx"
     retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "helm repo add jetstack https://charts.jetstack.io"
     retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "helm repo update"
-    
+
     # Install ingress-nginx v4.13.3 with enhanced configuration
     helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
         --version 4.13.3 \
@@ -193,10 +256,10 @@ install_ingress_certmanager() {
         --set controller.podSecurityContext.fsGroup=101 \
         --set controller.service.type=LoadBalancer \
         --wait --timeout=300s
-    
+
     # Install cert-manager v1.16.1 with CRDs
     retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.1/cert-manager.crds.yaml"
-    
+
     helm upgrade --install cert-manager jetstack/cert-manager \
         --version v1.16.1 \
         --namespace cert-manager \
@@ -211,12 +274,12 @@ install_ingress_certmanager() {
         --set cainjector.resources.requests.cpu=10m \
         --set cainjector.resources.requests.memory=32Mi \
         --wait --timeout=300s
-    
+
     # Wait for cert-manager to be ready
     kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=300s
     kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=300s
     kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=300s
-    
+
     # Create ClusterIssuer for Let's Encrypt
     cat <<EOF | kubectl apply -f -
 apiVersion: cert-manager.io/v1
@@ -238,7 +301,7 @@ spec:
               nodeSelector:
                 "kubernetes.io/os": linux
 EOF
-    
+
     log_success "ingress-nginx and cert-manager installed successfully"
 }
 
@@ -251,6 +314,7 @@ main() {
   export HARDEN_SSH=${HARDEN_SSH:-false}
   export EXPOSE_MINIO_CONSOLE=${EXPOSE_MINIO_CONSOLE:-false}
   export DEBUG=${DEBUG:-false}
+  export ENABLE_K3S_MONITORING=${ENABLE_K3S_MONITORING:-false}
 
   # Run system requirements check
   check_system_requirements
@@ -268,6 +332,12 @@ main() {
   ufw allow 443/tcp
   if [[ "$EXPOSE_MINIO_CONSOLE" == "true" ]]; then
     ufw allow 9001/tcp
+  fi
+  # Allow k3s and monitoring ports if enabled
+  if [[ "$ENABLE_K3S_MONITORING" == "true" ]]; then
+    ufw allow 6443/tcp  # k3s API server
+    ufw allow 3000/tcp  # Grafana
+    ufw allow 9090/tcp  # Prometheus
   fi
   yes | ufw enable || true
 
@@ -298,7 +368,7 @@ EOF
   log "Installing Docker Engine ${DOCKER_VERSION} and Compose plugin"
   # Remove old Docker versions
   apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
-  
+
   install -m 0755 -d /etc/apt/keyrings
   retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg"
   chmod a+r /etc/apt/keyrings/docker.gpg
@@ -306,7 +376,7 @@ EOF
     > /etc/apt/sources.list.d/docker.list
   apt-get update -y
   apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-  
+
   # Configure Docker daemon with security best practices
   mkdir -p /etc/docker
   cat >/etc/docker/daemon.json <<'DOCKEREOF'
@@ -321,16 +391,22 @@ EOF
   "no-new-privileges": true
 }
 DOCKEREOF
-  
+
   systemctl enable --now docker
   log_success "Docker ${DOCKER_VERSION} installed successfully"
 
   log "Installing Caddy ${CADDY_VERSION} for automatic TLS"
+
+  # Install Caddy using the official installation script (October 2025 method)
   retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg"
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
-  apt-get update -y
-  apt-get install -y caddy
-  
+
+  # Add Caddy repository with proper GPG key reference
+  echo "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" | tee /etc/apt/sources.list.d/caddy-stable.list
+
+  # Update package list and install Caddy
+  retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "apt-get update -y"
+  retry_with_backoff $RETRY_ATTEMPTS $RETRY_DELAY "apt-get install -y caddy"
+
   # Configure Caddy security settings
   mkdir -p /etc/caddy/conf.d
   cat >/etc/caddy/conf.d/security.conf <<'CADDYEOF'
@@ -352,7 +428,7 @@ DOCKEREOF
   }
 }
 CADDYEOF
-  
+
   systemctl enable --now caddy
   log_success "Caddy ${CADDY_VERSION} installed successfully"
 
@@ -398,15 +474,15 @@ import conf.d/security.conf
 {$DOMAIN} {
   # Apply security headers
   import security_headers
-  
+
   # Enhanced compression
   encode zstd gzip
-  
+
   # TLS configuration
   tls {$EMAIL} {
     protocols tls1.2 tls1.3
   }
-  
+
   # Rate limiting
   rate_limit {
     zone static_ip_10rs {
@@ -415,7 +491,7 @@ import conf.d/security.conf
       window 1s
     }
   }
-  
+
   # API routes
   @api path /auth/* /rest/* /realtime/* /storage/* /functions/* /pg/*
   handle @api {
@@ -425,7 +501,7 @@ import conf.d/security.conf
       health_timeout 5s
     }
   }
-  
+
   # Studio UI (optional)
   handle_path /studio/* {
     reverse_proxy 127.0.0.1:3000 {
@@ -434,12 +510,12 @@ import conf.d/security.conf
       health_timeout 5s
     }
   }
-  
+
   # Health check endpoint
   handle /health {
     respond "OK" 200
   }
-  
+
   # Security: Block common attack paths
   @blocked {
     path /.env* /config/* /admin/* /.git/*
@@ -447,7 +523,7 @@ import conf.d/security.conf
   handle @blocked {
     respond "Not Found" 404
   }
-  
+
   # Logging
   log {
     output file /var/log/caddy/{$DOMAIN}.log {
@@ -458,19 +534,31 @@ import conf.d/security.conf
   }
 }
 EOF
-  
+
   # Test Caddy configuration
   if ! caddy validate --config /etc/caddy/Caddyfile; then
     err "Caddy configuration validation failed"; exit 1
   fi
-  
+
   systemctl reload caddy
   log_success "Enhanced Caddy configuration applied"
+
+  # Optional: Install k3s and monitoring stack for advanced analytics
+  if [[ "$ENABLE_K3S_MONITORING" == "true" ]]; then
+    log "Installing k3s and comprehensive monitoring stack..."
+    install_k3s_helm
+    install_ingress_certmanager
+    install_monitoring_stack
+
+    log_success "k3s and monitoring stack installed successfully"
+    echo -e "${CYAN}• Grafana:${NC} https://$DOMAIN:3000 (admin/admin123)"
+    echo -e "${CYAN}• Prometheus:${NC} https://$DOMAIN:9090"
+  fi
 
   log "Setting up enhanced nightly Postgres backup with retention"
   mkdir -p /var/backups/supabase
   chmod 700 /var/backups/supabase
-  
+
   # Create backup script with compression and retention
   cat >/usr/local/bin/supabase-backup.sh <<'BACKUPEOF'
 #!/bin/bash
@@ -500,7 +588,7 @@ log "Found PostgreSQL container: $CONTAINER"
 # Create backup with compression
 if docker exec "$CONTAINER" bash -lc "pg_dumpall -U postgres" | gzip > "$BACKUP_DIR/pg_dumpall-$DATE.sql.gz"; then
   log "Backup completed successfully: pg_dumpall-$DATE.sql.gz"
-  
+
   # Verify backup integrity
   if gzip -t "$BACKUP_DIR/pg_dumpall-$DATE.sql.gz"; then
     log "Backup integrity verified"
@@ -508,11 +596,11 @@ if docker exec "$CONTAINER" bash -lc "pg_dumpall -U postgres" | gzip > "$BACKUP_
     log "ERROR: Backup integrity check failed"
     exit 1
   fi
-  
+
   # Clean up old backups
   find "$BACKUP_DIR" -name "pg_dumpall-*.sql.gz" -mtime +$RETENTION_DAYS -delete
   log "Cleaned up backups older than $RETENTION_DAYS days"
-  
+
   # Log backup size and count
   BACKUP_SIZE=$(du -h "$BACKUP_DIR/pg_dumpall-$DATE.sql.gz" | cut -f1)
   BACKUP_COUNT=$(find "$BACKUP_DIR" -name "pg_dumpall-*.sql.gz" | wc -l)
@@ -522,15 +610,15 @@ else
   exit 1
 fi
 BACKUPEOF
-  
+
   chmod +x /usr/local/bin/supabase-backup.sh
-  
+
   # Create cron job
   cat >/etc/cron.d/supabase-pgdump <<'CRONEOF'
 # Enhanced nightly Postgres backup at 02:10 with logging
 10 2 * * * root /usr/local/bin/supabase-backup.sh
 CRONEOF
-  
+
   log_success "Enhanced backup system configured with $BACKUP_RETENTION_DAYS day retention"
 
   log_success "Enhanced Supabase Workers bootstrap complete!"
@@ -558,13 +646,24 @@ CRONEOF
   if [[ "$EXPOSE_MINIO_CONSOLE" == "true" ]]; then
     echo -e "${CYAN}• MinIO Console:${NC} https://$DOMAIN:9001/"
   fi
+  if [[ "$ENABLE_K3S_MONITORING" == "true" ]]; then
+    echo -e "${CYAN}• Grafana Dashboard:${NC} https://$DOMAIN:3000/ (admin/admin123)"
+    echo -e "${CYAN}• Prometheus Metrics:${NC} https://$DOMAIN:9090/"
+    echo -e "${CYAN}• k3s API Server:${NC} https://$DOMAIN:6443/"
+  fi
   echo ""
   echo -e "${GREEN}Next steps:${NC}"
   echo -e "1. Test endpoints: curl https://$DOMAIN/health"
   echo -e "2. Access Supabase Studio: https://$DOMAIN/studio"
   echo -e "3. Configure your application with the generated keys"
-  echo -e "4. Set up monitoring and alerting"
-  echo -e "5. Review and customize backup schedule if needed"
+  if [[ "$ENABLE_K3S_MONITORING" == "true" ]]; then
+    echo -e "4. Access Grafana for monitoring: https://$DOMAIN:3000/"
+    echo -e "5. Set up custom dashboards and alerts in Grafana"
+    echo -e "6. Review and customize backup schedule if needed"
+  else
+    echo -e "4. Set up monitoring and alerting"
+    echo -e "5. Review and customize backup schedule if needed"
+  fi
 }
 
 main "$@"

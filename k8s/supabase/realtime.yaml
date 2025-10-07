@@ -6,7 +6,7 @@ metadata:
   labels:
     app: realtime
     app.kubernetes.io/name: realtime
-    app.kubernetes.io/version: "2025.10"
+    app.kubernetes.io/version: '2025.10'
     app.kubernetes.io/component: realtime
     app.kubernetes.io/part-of: supabase-stack
 spec:
@@ -26,9 +26,9 @@ spec:
         app.kubernetes.io/name: realtime
         app.kubernetes.io/component: realtime
       annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "4000"
-        prometheus.io/path: "/metrics"
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '4000'
+        prometheus.io/path: '/metrics'
     spec:
       securityContext:
         runAsNonRoot: true
@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: realtime
-          image: supabase/realtime:v2.30.23  # Updated to latest stable version with enhanced features
+          image: supabase/realtime:v2.30.23 # Updated to latest stable version with enhanced features
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -47,44 +47,44 @@ spec:
               protocol: TCP
           env:
             - name: PORT
-              value: "4000"
+              value: '4000'
             - name: DB_HOST
-              value: "pgbouncer"
+              value: 'pgbouncer'
             - name: DB_PORT
-              value: "5432"
+              value: '5432'
             - name: DB_USER
-              value: "postgres"
+              value: 'postgres'
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: supabase-secrets
                   key: POSTGRES_PASSWORD
             - name: DB_NAME
-              value: "postgres"
+              value: 'postgres'
             - name: DB_SSL
-              value: "false"
+              value: 'false'
             - name: API_JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: supabase-secrets
                   key: JWT_SECRET
             - name: FLY_ALLOC_ID
-              value: "fly123"
+              value: 'fly123'
             - name: FLY_APP_NAME
-              value: "realtime"
+              value: 'realtime'
             - name: SECRET_KEY_BASE
               valueFrom:
                 secretKeyRef:
                   name: supabase-secrets
                   key: JWT_SECRET
             - name: ERL_AFLAGS
-              value: "-proto_dist inet_tcp"
+              value: '-proto_dist inet_tcp'
             - name: ENABLE_TAILSCALE
-              value: "false"
+              value: 'false'
             - name: DNS_NODES
               value: "''"
             - name: LOG_LEVEL
-              value: "info"
+              value: 'info'
             - name: DB_ENC_KEY
               valueFrom:
                 secretKeyRef:
@@ -92,7 +92,7 @@ spec:
                   key: JWT_SECRET
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false  # Realtime needs write access for temp files
+            readOnlyRootFilesystem: false # Realtime needs write access for temp files
             runAsNonRoot: true
             runAsUser: 65534
             runAsGroup: 65534
@@ -101,11 +101,11 @@ spec:
                 - ALL
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "300m"
+              memory: '512Mi'
+              cpu: '300m'
             limits:
-              memory: "2Gi"
-              cpu: "1500m"
+              memory: '2Gi'
+              cpu: '1500m'
           readinessProbe:
             httpGet:
               path: /socket/websocket
@@ -170,9 +170,9 @@ metadata:
     app.kubernetes.io/component: realtime
     app.kubernetes.io/part-of: supabase-stack
   annotations:
-    prometheus.io/scrape: "true"
-    prometheus.io/port: "4000"
-    prometheus.io/path: "/metrics"
+    prometheus.io/scrape: 'true'
+    prometheus.io/port: '4000'
+    prometheus.io/path: '/metrics'
 spec:
   type: ClusterIP
   selector:

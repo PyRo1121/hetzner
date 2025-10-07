@@ -5,13 +5,13 @@ metadata:
   labels:
     name: platform
     app.kubernetes.io/name: supabase
-    app.kubernetes.io/version: "2025.10"
+    app.kubernetes.io/version: '2025.10'
     app.kubernetes.io/component: platform
     app.kubernetes.io/part-of: supabase-stack
     app.kubernetes.io/managed-by: kubectl
   annotations:
-    kubernetes.io/managed-by: "supabase-operator"
-    security.kubernetes.io/enforce: "restricted"
-    pod-security.kubernetes.io/enforce: "restricted"
-    pod-security.kubernetes.io/audit: "restricted"
-    pod-security.kubernetes.io/warn: "restricted"
+    kubernetes.io/managed-by: 'supabase-operator'
+    security.kubernetes.io/enforce: 'restricted'
+    pod-security.kubernetes.io/enforce: 'restricted'
+    pod-security.kubernetes.io/audit: 'restricted'
+    pod-security.kubernetes.io/warn: 'restricted'

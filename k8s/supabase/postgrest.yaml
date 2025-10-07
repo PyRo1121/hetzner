@@ -6,7 +6,7 @@ metadata:
   labels:
     app: postgrest
     app.kubernetes.io/name: postgrest
-    app.kubernetes.io/version: "2025.10"
+    app.kubernetes.io/version: '2025.10'
     app.kubernetes.io/component: api
     app.kubernetes.io/part-of: supabase-stack
 spec:
@@ -26,9 +26,9 @@ spec:
         app.kubernetes.io/name: postgrest
         app.kubernetes.io/component: api
       annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "3000"
-        prometheus.io/path: "/metrics"
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '3000'
+        prometheus.io/path: '/metrics'
     spec:
       securityContext:
         runAsNonRoot: true
@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: postgrest
-          image: postgrest/postgrest:v13.0.0  # Updated to latest stable version with enhanced JWT validation
+          image: postgrest/postgrest:v13.0.0 # Updated to latest stable version with enhanced JWT validation
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -52,26 +52,26 @@ spec:
                   name: supabase-secrets
                   key: DB_URL
             - name: PGRST_DB_SCHEMAS
-              value: "public,storage,graphql_public"
+              value: 'public,storage,graphql_public'
             - name: PGRST_DB_ANON_ROLE
-              value: "anon"
+              value: 'anon'
             - name: PGRST_JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: supabase-secrets
                   key: JWT_SECRET
             - name: PGRST_OPENAPI_PROXY_URI
-              value: "https://${DOMAIN}/rest/v1/"
+              value: 'https://${DOMAIN}/rest/v1/'
             - name: PGRST_LOG_LEVEL
-              value: "info"
+              value: 'info'
             - name: PGRST_DB_MAX_ROWS
-              value: "1000"
+              value: '1000'
             - name: PGRST_DB_POOL
-              value: "10"
+              value: '10'
             - name: PGRST_DB_POOL_TIMEOUT
-              value: "10"
+              value: '10'
             - name: PGRST_JWT_AUD
-              value: "authenticated"
+              value: 'authenticated'
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -83,11 +83,11 @@ spec:
                 - ALL
           resources:
             requests:
-              memory: "256Mi"
-              cpu: "200m"
+              memory: '256Mi'
+              cpu: '200m'
             limits:
-              memory: "1Gi"
-              cpu: "1000m"
+              memory: '1Gi'
+              cpu: '1000m'
           readinessProbe:
             httpGet:
               path: /
@@ -138,9 +138,9 @@ metadata:
     app.kubernetes.io/component: api
     app.kubernetes.io/part-of: supabase-stack
   annotations:
-    prometheus.io/scrape: "true"
-    prometheus.io/port: "3000"
-    prometheus.io/path: "/metrics"
+    prometheus.io/scrape: 'true'
+    prometheus.io/port: '3000'
+    prometheus.io/path: '/metrics'
 spec:
   type: ClusterIP
   selector:
