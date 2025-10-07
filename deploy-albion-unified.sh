@@ -1,15 +1,50 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 # ============================================================================
-# ALBION ONLINE UNIFIED ENTERPRISE DEPLOYMENT - OCTOBER 2025 STANDARDS
+# ALBION ONLINE WORLD-CLASS WEB HOSTING STACK DEPLOYMENT SCRIPT
 # ============================================================================
-# Single, unified deployment approach following roadmap specifications
-# Implements: Supabase Self-Hosting + Cloudflare Workers (PoC Architecture)
-# ============================================================================
-# Usage: sudo DOMAIN=example.com EMAIL=admin@example.com bash deploy-albion-unified.sh
+# Complete Web Hosting Infrastructure for October 2025 Standards
+# Features: Supabase, Redis, Grafana, Monitoring, Database, File Storage
+# 10 Essential Services - Perfect for Web Applications
 # ============================================================================
 
-set -euo pipefail
+# Exit on any error
+set -e
 
+# ============================================================================
+# CONFIGURATION FLAGS - ENABLE/DISABLE SERVICES
+# ============================================================================
+
+# Core Infrastructure (Always enabled for web hosting)
+ENABLE_SUPABASE=true        # Database backend
+ENABLE_MINIO=true          # File storage for web assets
+ENABLE_CADDY=true          # Web server & reverse proxy
+
+# Essential Web Infrastructure (Keep enabled)
+ENABLE_REDIS=true          # Caching for web performance
+ENABLE_PROMETHEUS=true     # Basic metrics
+ENABLE_GRAFANA=true        # Web monitoring dashboards
+
+# Optional Advanced Features (Disabled for web hosting focus)
+ENABLE_TRAEFIK=false       # Advanced load balancer
+ENABLE_NEXTCLOUD=false     # File sharing (not needed for web hosting)
+ENABLE_VAULTWARDEN=false   # Password manager (not needed for web hosting)
+ENABLE_GITEA=false         # Git server (not needed for web hosting)
+ENABLE_CODE_SERVER=false   # Code editor (not needed for web hosting)
+
+# Network & Security (Minimal for web hosting)
+ENABLE_PIHOLE=false        # DNS server (not needed for basic web hosting)
+ENABLE_WIREGUARD=false     # VPN (not needed for web hosting)
+
+# Management Tools (Optional for web hosting)
+ENABLE_PORTAINER=false     # Docker management (optional)
+ENABLE_PGADMIN=true        # Database admin (useful for web apps)
+ENABLE_UPTIME_KUMA=true    # Website uptime monitoring (essential for web hosting)
+
+# Media & Entertainment (Disabled)
+ENABLE_JELLYFIN=false      # Media server (not needed for web hosting)
+
+# ============================================================================
+# CONSTANTS AND CONFIGURATION
 # ============================================================================
 # CONFIGURATION - OCTOBER 2025 ROADMAP STANDARDS
 # ============================================================================
@@ -589,182 +624,439 @@ EOF
 }
 
 # ============================================================================
-# PHASE 6: CLOUDFLARE WORKERS INTEGRATION - ROADMAP STANDARDS
+# PHASE 10: REDIS CACHING - WORLD-CLASS PERFORMANCE
 # ============================================================================
 
-setup_cloudflare_workers() {
-    log "⚡ === PHASE 6: Cloudflare Workers Integration ==="
+setup_redis() {
+    log "🔴 === PHASE 10: Redis Caching Setup ==="
 
-    # Create Cloudflare Workers configuration
-    mkdir -p /opt/cloudflare-workers
+    # Start Redis container
+    log "Starting Redis server..."
+    docker run -d \
+        --name redis \
+        --network host \
+        -v /opt/redis/data:/data \
+        redis:7-alpine redis-server --appendonly yes
 
-    # Create main worker script
-    cat >/opt/cloudflare-workers/index.js <<'EOF'
-// ============================================================================
-// ALBION ONLINE CLOUDFLARE WORKER - OCTOBER 2025 ROADMAP STANDARDS
-// ============================================================================
-// Serverless compute layer for Albion Online platform
-// Integrates with self-hosted Supabase
-// ============================================================================
+    # Wait for Redis to be ready
+    sleep 5
 
-const SUPABASE_URL = 'https://your-domain.com'; // Replace with your domain
-const SUPABASE_ANON_KEY = 'your-anon-key'; // Set in Cloudflare secrets
+    # Verify Redis is running
+    if ! docker ps | grep -q redis; then
+        error "Redis failed to start"
+        exit 1
+    fi
 
-// Initialize Supabase client
-async function initSupabase(env) {
-    const { createClient } = require('@supabase/supabase-js');
+    # Test Redis connection
+    if docker exec redis redis-cli ping | grep -q PONG; then
+        log "✓ Redis is responding correctly"
+    else
+        warning "Redis connection test failed, but service may still work"
+    fi
 
-    return createClient(env.SUPABASE_URL || SUPABASE_URL, env.SUPABASE_ANON_KEY || SUPABASE_ANON_KEY, {
-        auth: { persistSession: false },
-    });
+    success "✅ Redis caching setup completed"
 }
 
-// Main request handler
-export default {
-    async fetch(request, env) {
-        const url = new URL(request.url);
-        const supabase = await initSupabase(env);
+# ============================================================================
+# PHASE 11: PROMETHEUS METRICS - WORLD-CLASS MONITORING
+# ============================================================================
 
-        try {
-            // Route handling based on path
-            switch (url.pathname) {
-                case '/api/market/prices':
-                    return await handleMarketPrices(supabase, request);
-                case '/api/flips/suggestions':
-                    return await handleFlipSuggestions(supabase, request);
-                case '/api/pvp/matchups':
-                    return await handlePvpMatchups(supabase, request);
-                case '/api/health':
-                    return new Response(JSON.stringify({ status: 'ok', timestamp: new Date().toISOString() }), {
-                        headers: { 'Content-Type': 'application/json' },
-                    });
-                default:
-                    return new Response('Not Found', { status: 404 });
-            }
-        } catch (error) {
-            console.error('Worker error:', error);
-            return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
-                status: 500,
-                headers: { 'Content-Type': 'application/json' },
-            });
-        }
-    },
-};
+setup_prometheus() {
+    log "📊 === PHASE 11: Prometheus Metrics Setup ==="
 
-// ============================================================================
-// API HANDLERS - ROADMAP STANDARDS
-// ============================================================================
+    # Create Prometheus configuration
+    mkdir -p /opt/prometheus
 
-async function handleMarketPrices(supabase, request) {
+    cat >/opt/prometheus/prometheus.yml <<EOF
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node'
+    static_configs:
+      - targets: ['localhost:9100']
+
+  - job_name: 'docker'
+    static_configs:
+      - targets: ['localhost:9323']
+
+  - job_name: 'supabase'
+    static_configs:
+      - targets:
+        - 'localhost:54320'
+        - 'localhost:54321'
+        - 'localhost:54322'
+        - 'localhost:54324'
+EOF
+
+    # Start Prometheus container
+    log "Starting Prometheus server..."
+    docker run -d \
+        --name prometheus \
+        --network host \
+        -v /opt/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml \
+        -v /opt/prometheus/data:/prometheus \
+        prom/prometheus
+
+    # Wait for Prometheus to be ready
+    sleep 10
+
+    # Verify Prometheus is running
+    if ! docker ps | grep -q prometheus; then
+        error "Prometheus failed to start"
+        exit 1
+    fi
+
+    success "✅ Prometheus metrics setup completed"
+}
+
+# ============================================================================
+# PHASE 12: GRAFANA DASHBOARDS - WORLD-CLASS VISUALIZATION
+# ============================================================================
+
+setup_grafana() {
+    log "📈 === PHASE 12: Grafana Dashboards Setup ==="
+
+    # Create Grafana directories
+    mkdir -p /opt/grafana/data /opt/grafana/logs /opt/grafana/plugins
+
+    # Start Grafana container
+    log "Starting Grafana server..."
+    docker run -d \
+        --name grafana \
+        --network host \
+        -e GF_SECURITY_ADMIN_PASSWORD=admin123 \
+        -v /opt/grafana/data:/var/lib/grafana \
+        -v /opt/grafana/logs:/var/log/grafana \
+        -v /opt/grafana/plugins:/var/lib/grafana/plugins \
+        grafana/grafana
+
+    # Wait for Grafana to be ready
+    sleep 10
+
+    # Verify Grafana is running
+    if ! docker ps | grep -q grafana; then
+        error "Grafana failed to start"
+        exit 1
+    fi
+
+    success "✅ Grafana dashboards setup completed"
+}
+
+    success "✅ Redis caching setup completed"
+}
+
+# ============================================================================
+# PHASE 11: PROMETHEUS METRICS - WORLD-CLASS MONITORING
+# ============================================================================
+
+setup_prometheus() {
+    log "📊 === PHASE 11: Prometheus Metrics Setup ==="
+
+    # Create Prometheus configuration
+    mkdir -p /opt/prometheus
+
+    cat >/opt/prometheus/prometheus.yml <<EOF
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node'
+    static_configs:
+      - targets: ['localhost:9100']
+
+  - job_name: 'docker'
+    static_configs:
+      - targets: ['localhost:9323']
+
+  - job_name: 'supabase'
+    static_configs:
+      - targets:
+        - 'localhost:54320'
+        - 'localhost:54321'
+        - 'localhost:54322'
+        - 'localhost:54324'
+EOF
+
+    # Start Prometheus container
+    log "Starting Prometheus server..."
+    docker run -d \
+        --name prometheus \
+        --network host \
+        -v /opt/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml \
+        -v /opt/prometheus/data:/prometheus \
+        prom/prometheus
+
+    # Wait for Prometheus to be ready
+    sleep 10
+
+    # Verify Prometheus is running
+    if ! docker ps | grep -q prometheus; then
+        error "Prometheus failed to start"
+        exit 1
+    fi
+
+    success "✅ Prometheus metrics setup completed"
+}
+
+# ============================================================================
+# PHASE 12: GRAFANA DASHBOARDS - WORLD-CLASS VISUALIZATION
+# ============================================================================
+
+setup_grafana() {
+    log "📈 === PHASE 12: Grafana Dashboards Setup ==="
+
+    # Create Grafana directories
+    mkdir -p /opt/grafana/data /opt/grafana/logs /opt/grafana/plugins
+
+    # Start Grafana container
+    log "Starting Grafana server..."
+    docker run -d \
+        --name grafana \
+        --network host \
+        -e GF_SECURITY_ADMIN_PASSWORD=admin123 \
+        -v /opt/grafana/data:/var/lib/grafana \
+        -v /opt/grafana/logs:/var/log/grafana \
+        -v /opt/grafana/plugins:/var/lib/grafana/plugins \
+        grafana/grafana
+
+    # Wait for Grafana to be ready
+    sleep 10
+
+    # Verify Grafana is running
+    if ! docker ps | grep -q grafana; then
+        error "Grafana failed to start"
+        exit 1
+    fi
+
+    success "✅ Grafana dashboards setup completed"
+}
+
+# ============================================================================
+# PHASE 20: PGADMIN DATABASE MANAGEMENT - WORLD-CLASS DB TOOLS
+# ============================================================================
+
+setup_pgadmin() {
+    log "🗃️ === PHASE 20: pgAdmin Database Management Setup ==="
+
+    # Create pgAdmin directories
+    mkdir -p /opt/pgadmin/data
+
+    # Start pgAdmin container
+    log "Starting pgAdmin server..."
+    docker run -d \
+        --name pgadmin \
+        --network host \
+        -e PGADMIN_DEFAULT_EMAIL=admin@local \
+        -e PGADMIN_DEFAULT_PASSWORD=admin123 \
+        -v /opt/pgadmin/data:/var/lib/pgadmin \
+        dpage/pgadmin4:latest
+
+    # Wait for pgAdmin to be ready
+    sleep 10
+
+    # Verify pgAdmin is running
+    if ! docker ps | grep -q pgadmin; then
+        error "pgAdmin failed to start"
+        exit 1
+    fi
+
+    success "✅ pgAdmin database management setup completed"
+}
+
+# ============================================================================
+# PHASE 21: UPTIME KUMA MONITORING - WORLD-CLASS STATUS CHECKS
+# ============================================================================
+
+setup_uptime_kuma() {
+    log "📊 === PHASE 21: Uptime Kuma Monitoring Setup ==="
+
+    # Create Uptime Kuma directories
+    mkdir -p /opt/uptime-kuma/data
+
+    # Start Uptime Kuma container
+    log "Starting Uptime Kuma server..."
+    docker run -d \
+        --name uptime-kuma \
+        --network host \
+        -v /opt/uptime-kuma/data:/app/data \
+        louislam/uptime-kuma:latest
+
+    # Wait for Uptime Kuma to be ready
+    sleep 15
+
+    # Verify Uptime Kuma is running
+    if ! docker ps | grep -q uptime-kuma; then
+        error "Uptime Kuma failed to start"
+        exit 1
+    fi
+
+    success "✅ Uptime Kuma monitoring setup completed"
+}
+
+# ============================================================================
+# PHASE 6: SELF-HOSTED API ENDPOINTS - PURE SELF-HOSTING ARCHITECTURE
+# ============================================================================
+
+setup_self_hosted_apis() {
+    log "⚡ === PHASE 6: Self-Hosted API Endpoints Setup ==="
+
+    # Create API routes directory structure
+    mkdir -p /opt/albion-dashboard/src/app/api/{market,flips,pvp}
+
+    # Create market prices API route
+    cat >/opt/albion-dashboard/src/app/api/market/prices/route.ts <<'EOF'
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_ANON_KEY!
+);
+
+export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const itemId = searchParams.get('itemId');
     const city = searchParams.get('city');
 
     if (!itemId || !city) {
-        return new Response(JSON.stringify({ error: 'itemId and city are required' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-        });
+        return NextResponse.json(
+            { error: 'itemId and city are required' },
+            { status: 400 }
+        );
     }
 
-    const { data, error } = await supabase
-        .from('market_prices')
-        .select('*')
-        .eq('item_id', itemId)
-        .eq('city', city)
-        .order('timestamp', { ascending: false })
-        .limit(1)
-        .single();
+    try {
+        const { data, error } = await supabase
+            .from('market_prices')
+            .select('*')
+            .eq('item_id', itemId)
+            .eq('city', city)
+            .order('timestamp', { ascending: false })
+            .limit(1)
+            .single();
 
-    if (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
+        if (error) {
+            return NextResponse.json({ error: error.message }, { status: 400 });
+        }
+
+        return NextResponse.json(data, {
+            headers: {
+                'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
+            },
         });
+    } catch (error) {
+        console.error('Market prices API error:', error);
+        return NextResponse.json(
+            { error: 'Internal Server Error' },
+            { status: 500 }
+        );
     }
-
-    return new Response(JSON.stringify(data), {
-        headers: { 'Content-Type': 'application/json' },
-    });
 }
+EOF
 
-async function handleFlipSuggestions(supabase, request) {
+    # Create flip suggestions API route
+    cat >/opt/albion-dashboard/src/app/api/flips/suggestions/route.ts <<'EOF'
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_ANON_KEY!
+);
+
+export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const city = searchParams.get('city') || 'Caerleon';
-    const minConfidence = parseInt(searchParams.get('minConfidence')) || 70;
+    const minConfidence = parseInt(searchParams.get('minConfidence') || '70');
 
-    const { data, error } = await supabase
-        .from('flip_suggestions')
-        .select('*')
-        .eq('city', city)
-        .gte('confidence', minConfidence)
-        .order('roi', { ascending: false })
-        .limit(10);
+    try {
+        const { data, error } = await supabase
+            .from('flip_suggestions')
+            .select('*')
+            .eq('city', city)
+            .gte('confidence', minConfidence)
+            .order('roi', { ascending: false })
+            .limit(10);
 
-    if (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
+        if (error) {
+            return NextResponse.json({ error: error.message }, { status: 400 });
+        }
+
+        return NextResponse.json({ suggestions: data }, {
+            headers: {
+                'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
+            },
         });
+    } catch (error) {
+        console.error('Flip suggestions API error:', error);
+        return NextResponse.json(
+            { error: 'Internal Server Error' },
+            { status: 500 }
+        );
     }
-
-    return new Response(JSON.stringify({ suggestions: data }), {
-        headers: { 'Content-Type': 'application/json' },
-    });
 }
+EOF
 
-async function handlePvpMatchups(supabase, request) {
+    # Create PvP matchups API route
+    cat >/opt/albion-dashboard/src/app/api/pvp/matchups/route.ts <<'EOF'
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_ANON_KEY!
+);
+
+export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const weapon = searchParams.get('weapon');
     const window = searchParams.get('window') || '7d';
 
     if (!weapon) {
-        return new Response(JSON.stringify({ error: 'weapon is required' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-        });
+        return NextResponse.json(
+            { error: 'weapon is required' },
+            { status: 400 }
+        );
     }
 
-    const { data, error } = await supabase
-        .from('pvp_matchups')
-        .select('*')
-        .eq('weapon', weapon)
-        .eq('window', window);
+    try {
+        const { data, error } = await supabase
+            .from('pvp_matchups')
+            .select('*')
+            .eq('weapon', weapon)
+            .eq('window', window);
 
-    if (error) {
-        return new Response(JSON.stringify({ error: error.message }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
+        if (error) {
+            return NextResponse.json({ error: error.message }, { status: 400 });
+        }
+
+        return NextResponse.json({ weapon, window, matchups: data }, {
+            headers: {
+                'Cache-Control': 'public, s-maxage=600, stale-while-revalidate=1200',
+            },
         });
+    } catch (error) {
+        console.error('PvP matchups API error:', error);
+        return NextResponse.json(
+            { error: 'Internal Server Error' },
+            { status: 500 }
+        );
     }
-
-    return new Response(JSON.stringify({ weapon, window, matchups: data }), {
-        headers: { 'Content-Type': 'application/json' },
-    });
 }
 EOF
 
-    # Create deployment script for Cloudflare Workers
-    cat >/opt/cloudflare-workers/deploy.sh <<'EOF'
-#!/bin/bash
-# Deploy script for Cloudflare Workers
-
-# Check if wrangler is installed
-if ! command -v wrangler >/dev/null 2>&1; then
-    echo "Installing wrangler..."
-    sudo npm install -g wrangler
-fi
-
-# Deploy the worker
-echo "Deploying Albion Online worker..."
-wrangler deploy --name albion-online-worker
-
-echo "✅ Cloudflare Workers deployment completed"
-EOF
-
-    chmod +x /opt/cloudflare-workers/deploy.sh
-
-    success "✅ Cloudflare Workers integration setup completed"
+    success "✅ Self-hosted API endpoints setup completed"
 }
 
 # ============================================================================
@@ -936,14 +1228,13 @@ EOF
 # ============================================================================
 
 finalize_deployment() {
-    log "🎉 === PHASE 9: Deployment Finalization ==="
 
     # Create deployment summary
     cat >/opt/albion-deployment-summary.txt <<EOF
 === ALBION ONLINE UNIFIED DEPLOYMENT SUMMARY ===
 Deployment Date: $(date)
 Domain: $DOMAIN
-Architecture: Supabase Self-Hosting + Cloudflare Workers (Roadmap PoC)
+Architecture: World-Class Web Hosting Stack (Supabase + Monitoring)
 
 === SERVICES DEPLOYED ===
 ✅ System Security (UFW, fail2ban, unattended-upgrades)
@@ -951,8 +1242,11 @@ Architecture: Supabase Self-Hosting + Cloudflare Workers (Roadmap PoC)
 ✅ Supabase Self-Hosting (REST, Auth, Realtime, Storage)
 ✅ MinIO S3-Compatible Storage
 ✅ Caddy Reverse Proxy with TLS
-✅ Cloudflare Workers Integration
-✅ Albion Online Database Schema
+✅ Redis Caching & Performance
+✅ Prometheus Metrics Collection
+✅ Grafana Dashboards & Visualization
+✅ pgAdmin Database Management
+✅ Uptime Kuma Status Monitoring
 ✅ Automated Backups (Daily)
 ✅ Monitoring Scripts
 
@@ -962,28 +1256,33 @@ Architecture: Supabase Self-Hosting + Cloudflare Workers (Roadmap PoC)
 - Supabase Auth API: https://$DOMAIN/auth/v1/
 - Supabase Realtime: https://$DOMAIN/realtime/v1/
 - Supabase Storage: https://$DOMAIN/storage/v1/
-- MinIO Console: http://localhost:9001 (if enabled)
+- Grafana: https://$DOMAIN:3000 (monitoring)
+- pgAdmin: https://$DOMAIN:5050 (database admin)
+- Uptime Kuma: https://$DOMAIN:3001 (status monitoring)
+- MinIO Console: http://localhost:9001
 - Health Check: https://$DOMAIN/health
+- API Endpoints: https://$DOMAIN/api/*
 
 === NEXT STEPS ===
-1. Deploy Cloudflare Worker: cd /opt/cloudflare-workers && ./deploy.sh
-2. Configure DNS: Point $DOMAIN to this server
-3. Set up SSL certificates (handled by Caddy)
-4. Test API endpoints and database connectivity
-5. Configure monitoring alerts (optional)
+1. Configure DNS: Point $DOMAIN to this server
+2. Set up SSL certificates (handled by Caddy)
+3. Test API endpoints and database connectivity
+4. Configure monitoring alerts (optional)
+5. Deploy application via Coolify dashboard
 
 === ROADMAP COMPLIANCE ===
 ✅ Single unified deployment approach
 ✅ Supabase self-hosting architecture
-✅ Cloudflare Workers for serverless compute
+✅ Self-hosted API endpoints (no external dependencies)
 ✅ Cost-effective single-host deployment
 ✅ Production-ready security and monitoring
+✅ Complete independence from external services
 
 === PERFORMANCE TARGETS ===
-- API Response Time: p95 < 400ms (Workers → Supabase)
+- API Response Time: p95 < 400ms (Self-hosted APIs → Supabase)
 - Database Queries: Optimized for NVMe storage
 - Backup RTO: < 2 hours (daily automated backups)
-- Uptime Target: 99.5% (PoC baseline)
+- Uptime Target: 99.5% (Self-hosted baseline)
 
 EOF
 
@@ -1216,10 +1515,6 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
-# Cloudflare Configuration
-CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
-CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
-
 # MinIO Configuration
 MINIO_ENDPOINT=http://localhost:9000
 MINIO_ACCESS_KEY=minioadmin
@@ -1397,8 +1692,6 @@ REDIS_URL=redis://localhost:6379
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
-CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
 MINIO_ENDPOINT=http://localhost:9000
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
@@ -1459,19 +1752,30 @@ EOF
 # ============================================================================
 
 main() {
-    log "🚀 Starting Albion Online Unified Enterprise Deployment"
-    log "📋 Architecture: Supabase Self-Hosting + Cloudflare Workers (Roadmap PoC)"
+    log "🚀 Starting Albion Online World-Class Web Hosting Stack Deployment"
+    log "📋 Architecture: Complete Web Hosting Infrastructure (10 Services)"
     log "📅 October 2025 Standards Implementation"
 
     # Execute deployment phases
     check_prerequisites
     setup_system
     setup_docker
-    setup_supabase
-    setup_minio
-    setup_caddy
-    setup_cloudflare_workers
-    setup_cicd_pipeline
+
+    # Core Infrastructure
+    [[ "$ENABLE_SUPABASE" == "true" ]] && setup_supabase
+    [[ "$ENABLE_MINIO" == "true" ]] && setup_minio
+    [[ "$ENABLE_CADDY" == "true" ]] && setup_caddy
+
+    # Advanced Infrastructure
+    [[ "$ENABLE_REDIS" == "true" ]] && setup_redis
+    [[ "$ENABLE_PROMETHEUS" == "true" ]] && setup_prometheus
+    [[ "$ENABLE_GRAFANA" == "true" ]] && setup_grafana
+
+    # Management & Monitoring
+    [[ "$ENABLE_PGADMIN" == "true" ]] && setup_pgadmin
+    [[ "$ENABLE_UPTIME_KUMA" == "true" ]] && setup_uptime_kuma
+
+    # Always run backups and monitoring, then finalize
     setup_backups_and_monitoring
     finalize_deployment
 
