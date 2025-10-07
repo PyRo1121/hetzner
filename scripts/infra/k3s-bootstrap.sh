@@ -132,7 +132,11 @@ install_db_pool() {
     --set primary.persistence.size=20Gi
 
   log "Installing PGBouncer"
-  helm upgrade --install my-release one-acre-fund/pgbouncer -n platform \
+  # Add OAF public charts repository for PgBouncer and refresh indices
+  helm repo add one-acre-fund https://one-acre-fund.github.io/oaf-public-charts || true
+  helm repo update
+  # Use a clear release name for PgBouncer
+  helm upgrade --install pgbouncer one-acre-fund/pgbouncer -n platform \
     --set auth.username=postgres \
     --set auth.password=$(kubectl get secret -n platform postgres-postgresql -o jsonpath='{.data.postgres-password}' | base64 -d) \
     --set database.host=postgres-postgresql.platform.svc.cluster.local \
