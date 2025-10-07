@@ -87,6 +87,8 @@ install_k3s_helm() {
   curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644" sh -
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
   ln -sf /usr/local/bin/kubectl /usr/bin/kubectl || true
+  # Wait for k3s API before proceeding with Helm installs
+  wait_for_k8s_api
   log "Installing helm"
   curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 }
@@ -277,3 +279,22 @@ main() {
 }
 
 main "$@"
+bwait() { sleep "$1"; }
+
+wait_for_k8s_api() {
+  log "Waiting for Kubernetes API to become reachable"
+  local attempts=0 max_attempts=60 # ~5 minutes
+  while (( attempts < max_attempts )); do
+    if kubectl version --short >/dev/null 2>&1; then
+      if kubectl get nodes >/dev/null 2>&1; then
+        log "Kubernetes API is ready"
+        return 0
+      fi
+    fi
+    attempts=$((attempts+1))
+    bwait 5
+  done
+  err "Kubernetes API not ready after 5 minutes. Inspect k3s service logs."
+  journalctl -u k3s -n 100 --no-pager || true
+  exit 1
+}
