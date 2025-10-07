@@ -21,6 +21,9 @@ set -euo pipefail
 log() { echo "[hcloud-fw] $*"; }
 err() { echo "[hcloud-fw:ERROR] $*" >&2; }
 
+# Minimum hcloud CLI version required for --rules-from support
+HC_VER="v1.42.0"
+
 require_var() {
   local name="$1"; local val
   val=$(printenv "$name" || true)
@@ -59,11 +62,20 @@ ensure_jq() {
 }
 
 install_hcloud_cli() {
+  local need_install="true"
   if command -v hcloud >/dev/null 2>&1; then
-    log "hcloud CLI present"
+    if hcloud firewall create --help 2>&1 | grep -q -- "--rules-from"; then
+      log "hcloud CLI present (supports --rules-from)"
+      need_install="false"
+    else
+      log "hcloud CLI present but missing --rules-from; installing ${HC_VER}"
+    fi
+  else
+    log "Installing hcloud CLI"
+  fi
+  if [[ "$need_install" != "true" ]]; then
     return
   fi
-  log "Installing hcloud CLI"
   ARCH=$(uname -m)
   case "$ARCH" in
     x86_64|amd64) ARCH_LABEL=amd64 ;;
@@ -71,7 +83,6 @@ install_hcloud_cli() {
     *) err "Unsupported architecture: $ARCH"; exit 1 ;;
   esac
   TMP=$(mktemp -d)
-  HC_VER="v1.42.0" # update as needed
   curl -L "https://github.com/hetznercloud/cli/releases/download/${HC_VER}/hcloud-linux-${ARCH_LABEL}.tar.gz" -o "$TMP/hcloud.tar.gz"
   tar -xzf "$TMP/hcloud.tar.gz" -C "$TMP"
   # Locate extracted binary (release archives may be flat or in a subdir)
@@ -87,6 +98,8 @@ install_hcloud_cli() {
   fi
   install -m 0755 "$SRC" /usr/local/bin/hcloud
   rm -rf "$TMP"
+  # Ensure new binary is picked up
+  hash -r
 }
 
 main() {
