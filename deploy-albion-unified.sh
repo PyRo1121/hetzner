@@ -234,9 +234,17 @@ setup_supabase() {
     echo "POSTGRES_WORK_MEM=16MB" >> .env
     echo "POSTGRES_MAINTENANCE_WORK_MEM=128MB" >> .env
 
-    # Start Supabase services
+    # Start Supabase services (excluding analytics which often fails)
     log "Starting Supabase services..."
-    retry_with_backoff 3 10 docker compose up -d
+    # First try to start all services, but don't fail if analytics fails
+    if ! docker compose up -d 2>/dev/null; then
+        log "Some services failed to start, trying to start core services without analytics..."
+        # Stop everything and restart without analytics
+        docker compose down 2>/dev/null || true
+        sleep 5
+        # Start all services except analytics
+        docker compose up -d --scale supabase-analytics=0
+    fi
 
     # Wait for services to be ready
     log "Waiting for Supabase services to be ready..."
