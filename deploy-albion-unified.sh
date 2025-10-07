@@ -49,11 +49,8 @@ ENABLE_PROMTAIL=true      # Log shipping to Loki
 ENABLE_NODE_EXPORTER=true # System monitoring
 ENABLE_CADVISOR=true      # Docker container monitoring
 
-# ============================================================================
-# CONSTANTS AND CONFIGURATION
-# ============================================================================
-# CONFIGURATION - OCTOBER 2025 ROADMAP STANDARDS
-# ============================================================================
+# Optional: Docker authentication for rate limit prevention
+ENABLE_DOCKER_AUTH="${ENABLE_DOCKER_AUTH:-false}"  # Set to true to enable Docker auth prompt
 
 # Core configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -230,6 +227,84 @@ setup_docker() {
     fi
 
     success "✅ Docker runtime setup completed"
+}
+
+# ============================================================================
+# DOCKER AUTHENTICATION - RATE LIMIT PREVENTION
+# ============================================================================
+
+setup_docker_auth() {
+    log "🐳 === Docker Authentication Setup ==="
+    log "🔐 To avoid Docker Hub rate limits, you can authenticate with your Docker Hub account"
+    log "📋 This will increase your pull limit from 100 to 200 pulls per 6 hours"
+
+    # Check if already authenticated
+    if docker info 2>/dev/null | grep -q "Username:"; then
+        log "✅ Already authenticated with Docker Hub"
+        docker info | grep "Username:" || true
+        return
+    fi
+
+    log ""
+    log "🔑 DOCKER HUB AUTHENTICATION OPTIONS:"
+    log ""
+    log "Option 1 - Automatic Login (Recommended):"
+    log "   Visit: https://hub.docker.com/settings/security"
+    log "   Generate a Personal Access Token"
+    log "   Enter your Docker Hub username and token below"
+    log ""
+    log "Option 2 - Interactive Login:"
+    log "   Run: docker login"
+    log "   Enter your Docker Hub credentials when prompted"
+    log ""
+    log "Option 3 - Skip (use rate-limited anonymous access)"
+    log ""
+
+    # Ask user if they want to authenticate
+    read -p "Do you want to authenticate with Docker Hub now? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        log "⏭️  Skipping Docker authentication - using anonymous access"
+        log "⚠️  Rate limit: 100 pulls per 6 hours"
+        return
+    fi
+
+    # Try automatic token-based authentication first
+    log ""
+    read -p "Enter your Docker Hub username (or press Enter to use interactive login): " DOCKER_USERNAME
+    if [[ -n "$DOCKER_USERNAME" ]]; then
+        log "Enter your Docker Hub Personal Access Token:"
+        log "   (Get one at: https://hub.docker.com/settings/security)"
+        read -s DOCKER_TOKEN
+        echo
+
+        if [[ -n "$DOCKER_TOKEN" ]]; then
+            log "🔐 Authenticating with Docker Hub..."
+            if echo "$DOCKER_TOKEN" | docker login --username "$DOCKER_USERNAME" --password-stdin; then
+                log "✅ Successfully authenticated with Docker Hub!"
+                log "🚀 Rate limit increased to 200 pulls per 6 hours"
+                return
+            else
+                log "❌ Authentication failed. Falling back to interactive login..."
+            fi
+        fi
+    fi
+
+    # Fallback to interactive login
+    log ""
+    log "🔄 Starting interactive Docker login..."
+    log "💡 When prompted, enter your Docker Hub username and password"
+    log "   (Or Personal Access Token as password)"
+    log ""
+
+    if docker login; then
+        log "✅ Successfully authenticated with Docker Hub!"
+        log "🚀 Rate limit increased to 200 pulls per 6 hours"
+    else
+        log "❌ Authentication failed or cancelled"
+        log "⏭️  Continuing with anonymous access (100 pulls per 6 hours)"
+        log "💡 You can authenticate later by running: docker login"
+    fi
 }
 
 # ============================================================================
@@ -1619,6 +1694,9 @@ main() {
     check_prerequisites
     setup_system
     setup_docker
+
+    # Optional Docker authentication to prevent rate limits
+    [[ "$ENABLE_DOCKER_AUTH" == "true" ]] && setup_docker_auth
 
     # Core Infrastructure
     [[ "$ENABLE_SUPABASE" == "true" ]] && setup_supabase
