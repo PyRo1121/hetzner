@@ -469,40 +469,74 @@ EOF
     success "   📊 Real-time aggregations with sub-second latency"
     success "   💾 Automatic partitioning and compression"
 }
-    mkdir -p /opt/redis-cluster
 
-    # Create Redis cluster configuration (3 nodes for VPS-3)
-    for i in {1..3}; do
-        port=$((7000 + i))
-        mkdir -p /opt/redis-cluster/$i
-        cat >/opt/redis-cluster/$i/redis.conf <<EOF
-port $port
-cluster-enabled yes
-cluster-config-file nodes.conf
-cluster-node-timeout 5000
-appendonly yes
+    # 1. Single Redis Instance (Simpler and more reliable for VPS)
+    log "Setting up single Redis instance optimized for VPS-3..."
+
+    # Remove complex cluster setup and use single instance
+    apt-get install -y redis-server
+
+    # Configure Redis for high performance
+    cat >/etc/redis/redis.conf <<EOF
+# Redis configuration optimized for VPS-3
+bind 127.0.0.1
+port 6379
+timeout 0
+tcp-keepalive 300
+daemonize yes
+supervised systemd
+loglevel notice
+logfile /var/log/redis/redis.log
+databases 16
 save 900 1
 save 300 10
 save 60 10000
-maxmemory 2gb  # Reduced for VPS-3
+stop-writes-on-bgsave-error no
+rdbcompression yes
+rdbchecksum yes
+dbfilename dump.rdb
+dir /var/lib/redis
+maxmemory 4gb
 maxmemory-policy allkeys-lru
+appendonly yes
+appendfilename "appendonly.aof"
+appendfsync everysec
+no-appendfsync-on-rewrite no
+auto-aof-rewrite-percentage 100
+auto-aof-rewrite-min-size 64mb
+lua-time-limit 5000
+slowlog-log-slower-than 10000
+slowlog-max-len 128
+notify-keyspace-events ""
+hash-max-ziplist-entries 512
+hash-max-ziplist-value 64
+list-max-ziplist-size -2
+list-compress-depth 0
+set-max-intset-entries 512
+zset-max-ziplist-entries 128
+zset-max-ziplist-value 64
+hll-sparse-max-bytes 3000
+activerehashing yes
+client-output-buffer-limit normal 0 0 0
+client-output-buffer-limit slave 256mb 64mb 60
+client-output-buffer-limit pubsub 32mb 8mb 60
+hz 10
+aof-rewrite-incremental-fsync yes
 EOF
 
-        # Start Redis instance with resource limits
-        docker run -d --name redis-$i \
-          --memory=2g --cpus=0.5 \
-          --network host \
-          -v /opt/redis-cluster/$i:/data \
-          redis:7-alpine redis-server /data/redis.conf
-    done
+    # Start Redis service
+    systemctl enable --now redis-server
 
-    # Initialize Redis cluster (3 nodes)
+    # Wait for Redis to be ready
     sleep 5
-    docker run --rm --network host redis:7-alpine redis-cli --cluster create \
-      127.0.0.1:7001 127.0.0.1:7002 127.0.0.1:7003 \
-      --cluster-replicas 0 --cluster-yes
 
-    success "   🔴 Redis Cluster configured (3 nodes optimized for VPS-3)"
+    # Test Redis connection
+    if redis-cli ping | grep -q PONG; then
+        success "   🔴 Redis single instance configured and running"
+    else
+        error "Redis failed to start"
+        exit 1
+    fi
 
     # 2. HTTP/3 + QUIC (Still works on VPS)
     log "Setting up HTTP/3 + QUIC server for sub-100ms responses..."
@@ -1290,7 +1324,7 @@ class BackgroundTaskScheduler {
       await execAsync('psql -U postgres -d postgres -c "SELECT add_compression_policy(\'kill_events\', INTERVAL \'3 days\')"');
 
       // Clean old cache entries
-      await execAsync('redis-cli --cluster call 127.0.0.1:7001 KEYS "temp:*" | xargs redis-cli --cluster call 127.0.0.1:7001 DEL');
+      await execAsync('redis-cli KEYS "temp:*" | xargs redis-cli DEL');
 
       console.log('Data storage optimized');
     } catch (error) {
@@ -1308,7 +1342,7 @@ class BackgroundTaskScheduler {
       await execAsync(`clickhouse-client --query="BACKUP TABLE albion.market_prices TO Disk('backups', 'market_prices_${timestamp}')"`);
 
       // Redis backups
-      await execAsync('redis-cli --cluster call 127.0.0.1:7001 SAVE');
+      await execAsync('redis-cli SAVE');
 
       // Log rotation
       await execAsync('logrotate -f /etc/logrotate.d/albion-services');
@@ -1375,7 +1409,7 @@ const Redis = require('ioredis');
 
 class AnomalyDetector {
   constructor() {
-    this.redis = new Redis({ host: 'localhost', port: 7001 });
+    this.redis = new Redis({ host: 'localhost', port: 6379 });
     this.thresholds = {
       marketVolatility: 50,    // 50% price change
       killRateSpike: 200,      // 200% increase in kills
