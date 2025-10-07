@@ -84,7 +84,8 @@ install_prereqs() {
   export TZ=${TZ:-UTC}
   timedatectl set-timezone "$TZ" || true
   apt-get update -y && apt-get upgrade -y
-  apt-get install -y curl jq git ufw fail2ban ca-certificates gnupg lsb-release md5sum
+  # Install base tools; md5sum is provided by coreutils (not a separate package)
+  apt-get install -y curl jq git ufw fail2ban ca-certificates gnupg lsb-release coreutils gettext-base openssl
 
   ufw default deny incoming
   ufw default allow outgoing
