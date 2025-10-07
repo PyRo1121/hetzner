@@ -16,7 +16,7 @@ export async function POST(request: Request) {
       timestamp: new Date().toISOString(),
     });
 
-    // TODO: Send to analytics service (Vercel Analytics, Google Analytics, etc.)
+    // TODO: Send to analytics service (self-hosted analytics, Google Analytics, etc.)
     // Example: await sendToAnalyticsService(metric);
 
     return NextResponse.json({ success: true });

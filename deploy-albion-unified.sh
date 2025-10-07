@@ -752,7 +752,7 @@ EOF
 # Check if wrangler is installed
 if ! command -v wrangler >/dev/null 2>&1; then
     echo "Installing wrangler..."
-    npm install -g wrangler
+    sudo npm install -g wrangler
 fi
 
 # Deploy the worker
@@ -995,6 +995,494 @@ EOF
 }
 
 # ============================================================================
+# PHASE 8: CI/CD PIPELINE SETUP (COOLIFY)
+# ============================================================================
+
+setup_cicd_pipeline() {
+    log "🔧 === PHASE 8: CI/CD Pipeline Setup with Coolify ==="
+
+    # Install Coolify on the server
+    log "Installing Coolify..."
+    curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash
+
+    # Wait for Coolify to be ready
+    log "Waiting for Coolify to start..."
+    sleep 30
+
+    # Create .github/workflows directory
+    mkdir -p .github/workflows
+
+    # Main CI/CD workflow for Coolify integration
+    cat > .github/workflows/deploy.yml <<'EOF'
+name: Deploy Albion Online Dashboard with Coolify
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  NODE_VERSION: '20'
+  BUN_VERSION: '1.0.0'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      
+      - name: Install dependencies
+        run: bun install
+      
+      - name: Run tests
+        run: bun test
+      
+      - name: Run linting
+        run: bun run lint
+      
+      - name: Type check
+        run: bun run type-check
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      
+      - name: Install dependencies
+        run: bun install
+      
+      - name: Build application
+        run: bun run build
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-files
+          path: .next/
+
+  deploy-production:
+    if: github.ref == 'refs/heads/main'
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-files
+          path: .next/
+      
+      - name: Deploy to Coolify
+        env:
+          COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+          COOLIFY_SERVER_URL: ${{ secrets.COOLIFY_SERVER_URL }}
+          COOLIFY_PROJECT_UUID: ${{ secrets.COOLIFY_PROJECT_UUID }}
+        run: |
+          # Trigger deployment via Coolify API
+          curl -X POST \
+            -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            "$COOLIFY_SERVER_URL/api/v1/deploy" \
+            -d '{
+              "uuid": "'$COOLIFY_PROJECT_UUID'",
+              "force_rebuild": true
+            }'
+
+  deploy-workers:
+    if: github.ref == 'refs/heads/main'
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Deploy Cloudflare Workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          sudo npm install -g wrangler
+          cd /opt/cloudflare-workers
+          wrangler deploy --name albion-online-worker
+EOF
+
+    # Lighthouse CI workflow
+    cat > .github/workflows/lighthouse.yml <<'EOF'
+name: Lighthouse CI
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: '1.0.0'
+      
+      - name: Install dependencies
+        run: bun install
+      
+      - name: Build application
+        run: bun run build
+      
+      - name: Start application
+        run: bun run start &
+        
+      - name: Wait for server
+        run: sleep 30
+      
+      - name: Run Lighthouse CI
+        run: bun run lighthouse:ci
+EOF
+
+    # Create Coolify configuration file
+    cat > coolify.json <<'EOF'
+{
+  "name": "albion-online-dashboard",
+  "description": "Albion Online Ultimate Resource Hub",
+  "type": "application",
+  "source": {
+    "type": "git",
+    "repository": "https://github.com/your-username/albion-online-dashboard.git",
+    "branch": "main"
+  },
+  "build": {
+    "command": "bun install && bun run build",
+    "directory": ".",
+    "environment": {
+      "NODE_ENV": "production",
+      "NEXT_TELEMETRY_DISABLED": "1"
+    }
+  },
+  "deploy": {
+    "command": "bun run start",
+    "port": 3000,
+    "healthcheck": {
+      "path": "/api/health",
+      "interval": 30,
+      "timeout": 10,
+      "retries": 3
+    }
+  },
+  "domains": [
+    {
+      "domain": "albion-dashboard.yourdomain.com",
+      "ssl": true
+    }
+  ],
+  "environment": {
+    "DATABASE_URL": "${DATABASE_URL}",
+    "REDIS_URL": "${REDIS_URL}",
+    "NEXT_PUBLIC_SUPABASE_URL": "${NEXT_PUBLIC_SUPABASE_URL}",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "${NEXT_PUBLIC_SUPABASE_ANON_KEY}",
+    "SUPABASE_SERVICE_ROLE_KEY": "${SUPABASE_SERVICE_ROLE_KEY}",
+    "CLOUDFLARE_API_TOKEN": "${CLOUDFLARE_API_TOKEN}",
+    "CLOUDFLARE_ACCOUNT_ID": "${CLOUDFLARE_ACCOUNT_ID}",
+    "MINIO_ENDPOINT": "${MINIO_ENDPOINT}",
+    "MINIO_ACCESS_KEY": "${MINIO_ACCESS_KEY}",
+    "MINIO_SECRET_KEY": "${MINIO_SECRET_KEY}"
+  }
+}
+EOF
+
+    # Create environment template
+    cat > .env.example <<'EOF'
+# Database Configuration
+DATABASE_URL=postgresql://postgres:password@localhost:5432/albion_online
+REDIS_URL=redis://localhost:6379
+
+# Supabase Configuration
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# Cloudflare Configuration
+CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
+CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
+
+# MinIO Configuration
+MINIO_ENDPOINT=http://localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+
+# Coolify Configuration
+COOLIFY_API_TOKEN=your-coolify-api-token
+COOLIFY_SERVER_URL=http://your-server-ip:8000
+COOLIFY_PROJECT_UUID=your-project-uuid
+
+# Application Configuration
+NODE_ENV=production
+NEXT_TELEMETRY_DISABLED=1
+EOF
+
+    # Create Coolify deployment script
+    cat > scripts/deploy-coolify.sh <<'EOF'
+#!/bin/bash
+
+# Coolify Deployment Script
+# This script helps deploy the Albion Online Dashboard to Coolify
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+log() {
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
+}
+
+warn() {
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
+}
+
+error() {
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}"
+    exit 1
+}
+
+# Check if required environment variables are set
+check_env_vars() {
+    log "Checking environment variables..."
+    
+    required_vars=(
+        "COOLIFY_API_TOKEN"
+        "COOLIFY_SERVER_URL"
+        "COOLIFY_PROJECT_UUID"
+    )
+    
+    for var in "${required_vars[@]}"; do
+        if [[ -z "${!var}" ]]; then
+            error "Environment variable $var is not set"
+        fi
+    done
+    
+    log "All required environment variables are set"
+}
+
+# Create project in Coolify
+create_coolify_project() {
+    log "Creating project in Coolify..."
+    
+    curl -X POST \
+        -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
+        -H "Content-Type: application/json" \
+        "$COOLIFY_SERVER_URL/api/v1/projects" \
+        -d @coolify.json
+    
+    log "Project created successfully"
+}
+
+# Deploy to Coolify
+deploy_to_coolify() {
+    log "Deploying to Coolify..."
+    
+    response=$(curl -X POST \
+        -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
+        -H "Content-Type: application/json" \
+        "$COOLIFY_SERVER_URL/api/v1/deploy" \
+        -d '{
+            "uuid": "'$COOLIFY_PROJECT_UUID'",
+            "force_rebuild": true
+        }')
+    
+    if [[ $? -eq 0 ]]; then
+        log "Deployment triggered successfully"
+        echo "Response: $response"
+    else
+        error "Failed to trigger deployment"
+    fi
+}
+
+# Main deployment function
+main() {
+    log "Starting Coolify deployment..."
+    
+    check_env_vars
+    deploy_to_coolify
+    
+    log "Deployment completed successfully!"
+    log "Check your Coolify dashboard at: $COOLIFY_SERVER_URL"
+}
+
+# Run main function
+main "$@"
+EOF
+
+    # Make the deployment script executable
+    chmod +x scripts/deploy-coolify.sh
+
+    # Create Coolify setup instructions
+    cat > COOLIFY-SETUP.md <<'EOF'
+# Coolify Setup Instructions
+
+This guide will help you set up Coolify for self-hosted CI/CD deployment of the Albion Online Dashboard.
+
+## Prerequisites
+
+- A server with at least 2 CPU cores, 4GB RAM, and 40GB storage
+- Ubuntu 20.04+ (recommended: Ubuntu 24.04 LTS)
+- Root or sudo access
+- SSH access to the server
+
+## Installation Steps
+
+### 1. Install Coolify
+
+The deployment script will automatically install Coolify, but you can also install it manually:
+
+```bash
+curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash
+```
+
+### 2. Access Coolify Dashboard
+
+After installation, access Coolify at: `http://your-server-ip:8000`
+
+Create your first admin account when prompted.
+
+### 3. Configure Firewall
+
+Ensure these ports are open:
+- 8000 (Coolify dashboard)
+- 80 (HTTP)
+- 443 (HTTPS)
+- 22 (SSH)
+
+```bash
+sudo ufw allow 8000/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow ssh
+sudo ufw enable
+```
+
+### 4. Create Project in Coolify
+
+1. Log into your Coolify dashboard
+2. Create a new project
+3. Connect your Git repository
+4. Configure environment variables
+5. Set up domain and SSL
+
+### 5. Environment Variables
+
+Set these environment variables in Coolify:
+
+```
+DATABASE_URL=postgresql://postgres:password@localhost:5432/albion_online
+REDIS_URL=redis://localhost:6379
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+CLOUDFLARE_API_TOKEN=your-cloudflare-api-token
+CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
+MINIO_ENDPOINT=http://localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+NODE_ENV=production
+NEXT_TELEMETRY_DISABLED=1
+```
+
+### 6. GitHub Secrets
+
+Add these secrets to your GitHub repository:
+
+- `COOLIFY_API_TOKEN`: Your Coolify API token
+- `COOLIFY_SERVER_URL`: Your Coolify server URL (e.g., http://your-server-ip:8000)
+- `COOLIFY_PROJECT_UUID`: Your project UUID from Coolify
+
+### 7. Deploy
+
+Push to your main branch to trigger automatic deployment via GitHub Actions.
+
+## Manual Deployment
+
+You can also deploy manually using the provided script:
+
+```bash
+./scripts/deploy-coolify.sh
+```
+
+## Monitoring
+
+Monitor your deployments in the Coolify dashboard:
+- Real-time logs
+- Resource usage
+- Deployment history
+- Health checks
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Port 8000 not accessible**: Check firewall settings
+2. **Deployment fails**: Check environment variables and logs
+3. **SSL issues**: Ensure domain DNS is properly configured
+
+### Getting Help
+
+- Coolify Documentation: https://coolify.io/docs
+- Coolify Discord: https://discord.gg/coolify
+- GitHub Issues: https://github.com/coollabsio/coolify/issues
+EOF
+
+    log "✅ Coolify CI/CD pipeline setup completed!"
+    log "📖 Check COOLIFY-SETUP.md for detailed setup instructions"
+    log "🚀 Access Coolify dashboard at: http://$(curl -s ifconfig.me):8000"
+}
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# Cloudflare Configuration
+CLOUDFLARE_API_TOKEN=your-api-token
+CLOUDFLARE_ACCOUNT_ID=your-account-id
+
+# MinIO Configuration
+MINIO_ENDPOINT=localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin123
+
+# Application Configuration
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NODE_ENV=development
+LOG_LEVEL=info
+
+# Analytics (Optional)
+NEXT_PUBLIC_GA_ID=G-XXXXXXXXXX
+NEXT_PUBLIC_POSTHOG_KEY=phc_xxxxxxxxxx
+
+# Rate Limiting
+RATE_LIMIT_REQUESTS_PER_MINUTE=100
+RATE_LIMIT_WINDOW_MS=60000
+EOF
+
+    success "✅ CI/CD pipeline setup completed"
+}
+
+# ============================================================================
 # MAIN DEPLOYMENT ORCHESTRATION - ROADMAP STANDARDS
 # ============================================================================
 
@@ -1011,6 +1499,7 @@ main() {
     setup_minio
     setup_caddy
     setup_cloudflare_workers
+    setup_cicd_pipeline
     setup_backups_and_monitoring
     finalize_deployment
 

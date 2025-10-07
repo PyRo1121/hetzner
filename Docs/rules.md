@@ -56,7 +56,7 @@ This `rules.md` file defines the **strict guidelines** the AI must follow when e
 
 ## 10. Release & Deployment
 
-- After Phase 9, deploy to **Vercel** with Turbopack optimized builds.
+- After Phase 9, deploy to **Coolify** with self-hosted CI/CD pipeline.
 - Ensure **CSP headers**, **RLS**, and **rate limits** are configured.
 
 ---

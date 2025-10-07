@@ -1,7 +1,7 @@
 import type { MetadataRoute } from 'next';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const baseUrl = 'https://albion-dashboard.vercel.app';
+  const baseUrl = 'https://your-domain.com';
   
   return [
     {
