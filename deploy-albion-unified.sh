@@ -955,19 +955,36 @@ setup_redis() {
         if [[ -n "$pid" ]]; then
             log "Killing process $pid using port 6379..."
             kill -9 $pid 2>/dev/null || true
-            sleep 2
+            sleep 3
         fi
     fi
 
-    # Additional cleanup - kill any existing Redis processes
+    # More aggressive cleanup - kill any existing Redis processes
     log "Ensuring no existing Redis processes are running..."
     pkill -f redis 2>/dev/null || true
-    sleep 2
+    sleep 3
 
-    # Double-check port is free
+    # Kill any process using port 6379 more aggressively
     if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
-        log "Port 6379 still in use, waiting longer..."
+        log "Port 6379 still in use, using more aggressive cleanup..."
+        # Get all PIDs using port 6379
+        local pids=$(lsof -ti:6379 2>/dev/null || ss -tlnp 2>/dev/null | grep ":6379 " | awk '{print $6}' | cut -d',' -f2 | cut -d'=' -f2)
+        for pid in $pids; do
+            if [[ -n "$pid" ]]; then
+                log "Force killing process $pid using port 6379..."
+                kill -9 $pid 2>/dev/null || true
+            fi
+        done
         sleep 5
+    fi
+
+    # Final check - ensure port is free
+    if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
+        log "CRITICAL: Port 6379 still in use after cleanup attempts"
+        log "Checking what processes are using it..."
+        ss -tlnp | grep ":6379 " || lsof -i :6379
+        error "Failed to free port 6379. Please manually kill the process using it."
+        exit 1
     fi
 
     # Start Redis container with 2025 security and performance standards
