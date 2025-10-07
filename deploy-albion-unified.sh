@@ -252,10 +252,15 @@ validate_env_file() {
         # Skip empty lines and comments
         [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
 
-        # Basic format check - just ensure there's an equals sign somewhere in the line
-        if ! [[ "$line" =~ = ]]; then
-            error "Line $line_num: Invalid format - missing equals sign"
-            error "Line: $line"
+        # Skip lines that are already quoted (the script is getting confused by this)
+        if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*=\" ]]; then
+            continue
+        fi
+
+        # Basic format check - just ensure there's an equals sign
+        if ! [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+            error "Line $line_num: Invalid format - $line"
+            error "Expected format: VARIABLE_NAME=value"
             return 1
         fi
     done < "$env_file"
