@@ -262,8 +262,14 @@ validate_env_file() {
         # Extract value part after =
         local value="${line#*=}"
         
-        # Check if value contains special characters but isn't quoted
-        if [[ "$value" =~ [\$\`\"\\\!\#\%\^\&\*\(\)\|\<\>\?\;] ]] && ! [[ "$value" =~ ^[\"\'].*[\"\']$ ]]; then
+        # Check if value is properly quoted (starts and ends with quotes)
+        if [[ "$value" =~ ^[\"\'].*[\"\']$ ]]; then
+            # Value is properly quoted, skip special character check
+            continue
+        fi
+        
+        # Check if unquoted value contains special characters that need quoting
+        if [[ "$value" =~ [\$\`\"\\!\#\%\^\&\*\(\)\|\<\>\?\;[:space:]] ]]; then
             error "Line $line_num: Unquoted special characters detected"
             error "Please quote the value: ${line%%=*}=\"$value\""
             return 1
