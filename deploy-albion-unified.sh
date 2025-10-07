@@ -245,37 +245,38 @@ setup_k3s() {
 validate_env_file() {
     local env_file="$1"
     local line_num=0
-    
+
     while IFS= read -r line || [[ -n "$line" ]]; do
         ((line_num++))
-        
+
         # Skip empty lines and comments
         [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-        
+
         # Check for proper variable format
         if ! [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
             error "Line $line_num: Invalid format - $line"
             error "Expected format: VARIABLE_NAME=value"
             return 1
         fi
-        
+
         # Extract value part after =
         local value="${line#*=}"
-        
+
         # Check if value is properly quoted (starts and ends with quotes)
         if [[ "$value" =~ ^[\"\'].*[\"\']$ ]]; then
             # Value is properly quoted, skip special character check
             continue
         fi
-        
+
         # Check if unquoted value contains special characters that need quoting
-        if [[ "$value" =~ [\$\`\"\\!\#\%\^\&\*\(\)\|\<\>\?\;[:space:]] ]]; then
+        # Exclude quotes and colons from the special character check
+        if [[ "$value" =~ [\$\`\\!\#\%\^\&\*\(\)\|\<\>\?\;[:space:]] ]]; then
             error "Line $line_num: Unquoted special characters detected"
             error "Please quote the value: ${line%%=*}=\"$value\""
             return 1
         fi
     done < "$env_file"
-    
+
     return 0
 }
 
@@ -301,7 +302,7 @@ setup_secrets() {
     # Source the .env file with error handling
     log "Sourcing environment variables from $SECRETS_FILE"
     set -a  # Automatically export all variables
-    
+
     # Use a safer method to source the file
     if ! (set -e; source "$SECRETS_FILE"); then
         error "❌ Failed to source .env file. Check for syntax errors."
@@ -311,7 +312,7 @@ setup_secrets() {
         log "  - Invalid variable names"
         exit 1
     fi
-    
+
     set +a
     success "✅ Environment variables sourced from $SECRETS_FILE"
 
