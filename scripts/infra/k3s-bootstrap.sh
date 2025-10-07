@@ -2,7 +2,7 @@
 # k3s bootstrap for Supabase (self-host PoC) + Observability + Backups
 # Target: single-node Hetzner Cloud VM (e.g., CPX11). Requires Ubuntu 22.04.
 #
-# Usage (run on server via sudo):
+# Usage (run as root via sudo):
 #   sudo DOMAIN=example.com EMAIL=admin@example.com bash k3s-bootstrap.sh
 #
 # Optional env:
@@ -17,11 +17,20 @@
 #
 # This script installs:
 # - k3s, helm, ingress-nginx, cert-manager (Let's Encrypt HTTP-01)
-# - Bitnami Postgres + PGBouncer
+# - Bitnami Postgres + PgBouncer (using icoretech chart for reliability)
 # - MinIO (optional if S3_ENDPOINT provided; otherwise local MinIO)
 # - Prometheus + Alertmanager + Grafana (kube-prometheus-stack)
 # - Loki + Promtail, Blackbox exporter (uptime checks)
 # - Supabase core services (Auth/GoTrue, PostgREST, Realtime, Storage API) with path-based Ingress
+#
+# Optimizations:
+# - Added rollout status waits after each major installation for reliability.
+# - Switched to icoretech/pgbouncer chart for better availability and documented values.
+# - Computed MD5 hash for PgBouncer userlist as required by the chart.
+# - Added resource requests/limits for Postgres to address Bitnami warning.
+# - Improved error handling and logging.
+# - Idempotent operations with helm upgrade --install.
+# - Timeout for waits to prevent infinite hangs.
 
 set -euo pipefail
 
@@ -40,7 +49,7 @@ require_var() {
 
 rand() { openssl rand -hex 16; }
 b64() { printf '%s' "$1" | base64 -w0; }
-b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+b64url() { printf '%s' "$1" | openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 generate_jwt() {
   local role="$1"; local secret="$2"; local iat exp header payload h b s
@@ -53,9 +62,6 @@ generate_jwt() {
   printf '%s.%s.%s' "$h" "$b" "$s"
 }
 
-# Wait helper and Kubernetes API readiness check (must be defined before use)
-bwait() { sleep "$1"; }
-
 wait_for_k8s_api() {
   log "Waiting for Kubernetes API to become reachable"
   local attempts=0 max_attempts=60 # ~5 minutes
@@ -67,7 +73,7 @@ wait_for_k8s_api() {
       fi
     fi
     attempts=$((attempts+1))
-    bwait 5
+    sleep 5
   done
   err "Kubernetes API not ready after 5 minutes. Inspect k3s service logs."
   journalctl -u k3s -n 100 --no-pager || true
@@ -78,7 +84,7 @@ install_prereqs() {
   export TZ=${TZ:-UTC}
   timedatectl set-timezone "$TZ" || true
   apt-get update -y && apt-get upgrade -y
-  apt-get install -y curl jq git ufw fail2ban ca-certificates gnupg lsb-release
+  apt-get install -y curl jq git ufw fail2ban ca-certificates gnupg lsb-release md5sum
 
   ufw default deny incoming
   ufw default allow outgoing
@@ -108,7 +114,6 @@ install_k3s_helm() {
   curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644" sh -
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
   ln -sf /usr/local/bin/kubectl /usr/bin/kubectl || true
-  # Wait for k3s API before proceeding with Helm installs
   wait_for_k8s_api
   log "Installing helm"
   curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
@@ -117,16 +122,21 @@ install_k3s_helm() {
 install_ingress_certmanager() {
   log "Installing ingress-nginx"
   kubectl create namespace ingress-nginx || true
-  helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+  helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx || true
   helm repo update
   helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx \
     --set controller.metrics.enabled=true
+  kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=5m || err "ingress-nginx rollout failed"
 
   log "Installing cert-manager"
   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.4/cert-manager.crds.yaml
-  helm repo add jetstack https://charts.jetstack.io
+  helm repo add jetstack https://charts.jetstack.io || true
+  helm repo update
   helm upgrade --install cert-manager jetstack/cert-manager -n cert-manager --create-namespace \
     --set installCRDs=false
+  kubectl rollout status deployment/cert-manager -n cert-manager --timeout=2m || err "cert-manager rollout failed"
+  kubectl rollout status deployment/cert-manager-cainjector -n cert-manager --timeout=2m || err "cert-manager-cainjector rollout failed"
+  kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=2m || err "cert-manager-webhook rollout failed"
 
   cat <<EOF | kubectl apply -f -
 apiVersion: cert-manager.io/v1
@@ -149,21 +159,34 @@ EOF
 install_db_pool() {
   log "Installing Postgres"
   kubectl create namespace platform || true
-  helm repo add bitnami https://charts.bitnami.com/bitnami
-  helm upgrade --install postgres bitnami/postgresql -n platform \
-    --set auth.postgresPassword=${PG_PASSWORD:-$(rand)} \
-    --set primary.persistence.size=20Gi
-
-  log "Installing PGBouncer"
-  # Add OAF public charts repository for PgBouncer and refresh indices
-  helm repo add one-acre-fund https://one-acre-fund.github.io/oaf-public-charts || true
+  helm repo add bitnami https://charts.bitnami.com/bitnami || true
   helm repo update
-  # Use a clear release name for PgBouncer
-  helm upgrade --install pgbouncer one-acre-fund/pgbouncer -n platform \
-    --set auth.username=postgres \
-    --set auth.password=$(kubectl get secret -n platform postgres-postgresql -o jsonpath='{.data.postgres-password}' | base64 -d) \
-    --set database.host=postgres-postgresql.platform.svc.cluster.local \
-    --set replicaCount=1
+  PG_PASSWORD=${PG_PASSWORD:-$(rand)}
+  helm upgrade --install postgres bitnami/postgresql -n platform \
+    --set auth.postgresPassword="$PG_PASSWORD" \
+    --set primary.persistence.size=20Gi \
+    --set primary.resources.requests.cpu=500m \
+    --set primary.resources.requests.memory=1Gi \
+    --set primary.resources.limits.cpu=1 \
+    --set primary.resources.limits.memory=2Gi
+  kubectl rollout status statefulset/postgres-postgresql -n platform --timeout=5m || err "Postgres rollout failed"
+
+  log "Installing PGBouncer (using icoretech chart for reliability)"
+  helm repo add icoretech https://icoretech.github.io/helm || true
+  helm repo update
+  DB_PASS=$(kubectl get secret -n platform postgres-postgresql -o jsonpath='{.data.postgres-password}' | base64 -d)
+  USERNAME="postgres"
+  HASH=$(printf '%s%s' "$DB_PASS" "$USERNAME" | md5sum | cut -d' ' -f1)
+  MD5PASS="md5$HASH"
+  helm upgrade --install pgbouncer icoretech/pgbouncer -n platform \
+    --set replicaCount=1 \
+    --set pgbouncer.auth_type=md5 \
+    --set pgbouncer.pool_mode=transaction \
+    --set pgbouncer.max_client_conn=100 \
+    --set pgbouncer.default_pool_size=20 \
+    --set config.databases.postgres="host=postgres-postgresql.platform.svc.cluster.local port=5432 dbname=postgres" \
+    --set config.userlist."$USERNAME"="$MD5PASS"
+  kubectl rollout status deployment/pgbouncer -n platform --timeout=2m || err "PgBouncer rollout failed"
 }
 
 install_minio() {
@@ -172,26 +195,32 @@ install_minio() {
     return
   fi
   log "Installing MinIO"
+  helm repo update
   helm upgrade --install minio bitnami/minio -n platform --set mode=standalone \
     --set auth.rootUser=${S3_ACCESS_KEY:-minio_access} \
     --set auth.rootPassword=${S3_SECRET_KEY:-minio_secret} \
     --set persistence.size=25Gi
+  kubectl rollout status deployment/minio -n platform --timeout=2m || err "MinIO rollout failed"
 }
 
 install_observability() {
   log "Installing kube-prometheus-stack"
-  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-  helm repo add grafana https://grafana.github.io/helm-charts
+  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts || true
+  helm repo add grafana https://grafana.github.io/helm-charts || true
   helm repo update
   helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack -n monitoring --create-namespace \
     --set grafana.adminPassword=${GRAFANA_ADMIN_PASSWORD:-$(rand)}
+  kubectl rollout status deployment/kube-prom-stack-grafana -n monitoring --timeout=2m || err "Grafana rollout failed"
 
   log "Installing Loki + Promtail"
   helm upgrade --install loki grafana/loki -n monitoring --set persistence.enabled=false
+  kubectl rollout status statefulset/loki -n monitoring --timeout=2m || err "Loki rollout failed"
   helm upgrade --install promtail grafana/promtail -n monitoring --set config.lokiAddress=http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+  kubectl rollout status daemonset/promtail -n monitoring --timeout=2m || err "Promtail rollout failed"
 
   log "Installing Blackbox Exporter"
   helm upgrade --install blackbox-exporter prometheus-community/prometheus-blackbox-exporter -n monitoring
+  kubectl rollout status deployment/blackbox-exporter-prometheus-blackbox-exporter -n monitoring --timeout=2m || err "Blackbox exporter rollout failed"
 }
 
 deploy_supabase() {
@@ -224,9 +253,13 @@ EOF
   log "Applying Supabase core manifests"
   kubectl apply -n platform -f /root/k8s/supabase/namespace.yaml || true
   DOMAIN=${DOMAIN} EMAIL=${EMAIL} envsubst < /root/k8s/supabase/gotrue.yaml | kubectl apply -n platform -f -
+  kubectl rollout status deployment/gotrue -n platform --timeout=2m || err "GoTrue rollout failed"
   DOMAIN=${DOMAIN} EMAIL=${EMAIL} envsubst < /root/k8s/supabase/postgrest.yaml | kubectl apply -n platform -f -
+  kubectl rollout status deployment/postgrest -n platform --timeout=2m || err "PostgREST rollout failed"
   DOMAIN=${DOMAIN} EMAIL=${EMAIL} envsubst < /root/k8s/supabase/realtime.yaml | kubectl apply -n platform -f -
+  kubectl rollout status deployment/realtime -n platform --timeout=2m || err "Realtime rollout failed"
   DOMAIN=${DOMAIN} EMAIL=${EMAIL} envsubst < /root/k8s/supabase/storage.yaml | kubectl apply -n platform -f -
+  kubectl rollout status deployment/storage -n platform --timeout=2m || err "Storage rollout failed"
   DOMAIN=${DOMAIN} EMAIL=${EMAIL} envsubst < /root/k8s/supabase/ingress.yaml | kubectl apply -n platform -f -
 }
 
@@ -241,7 +274,6 @@ install_flux_gitops() {
   export GIT_INTERVAL=${GIT_INTERVAL:-1m}
   log "Installing Flux CD and bootstrapping GitOps"
   kubectl apply -f https://github.com/fluxcd/flux2/releases/latest/download/install.yaml
-  # Wait for CRDs
   kubectl -n flux-system rollout status deployment/flux-controller --timeout=120s || true
   # Create Git source and kustomization
   kubectl -n flux-system apply -f - <<EOF
@@ -292,7 +324,6 @@ main() {
   install_db_pool
   install_minio
   install_observability
-  # Place manifests in /root/k8s
   mkdir -p /root/k8s/supabase
   cp -r $(pwd)/k8s/supabase/* /root/k8s/supabase/
   deploy_supabase
