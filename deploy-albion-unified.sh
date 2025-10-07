@@ -45,6 +45,7 @@ retry_with_backoff() {
 
     local attempt=1
     while [[ $attempt -le $max_attempts ]]; do
+        log "Executing: $*"
         if "$@"; then
             return 0
         fi
