@@ -242,61 +242,9 @@ setup_supabase() {
     if [[ -f docker-compose.yml ]]; then
         log "Checking docker-compose.yml syntax..."
         if ! docker compose config --quiet 2>/dev/null; then
-            log "docker-compose.yml has syntax errors, attempting automatic fix..."
-            cp docker-compose.yml docker-compose.yml.original
-
-            # Try automatic fix for duplicate container_name keys
-            awk '
-            BEGIN { in_service = 0; container_name_seen = 0 }
-            /^  [a-zA-Z][a-zA-Z0-9_-]*:/ {
-                in_service = 1
-                container_name_seen = 0
-                print
-                next
-            }
-            /^    container_name:/ {
-                if (!container_name_seen) {
-                    container_name_seen = 1
-                    print
-                }
-                next
-            }
-            /^  [a-zA-Z]/ && in_service && !/^    / {
-                in_service = 0
-                container_name_seen = 0
-            }
-            { print }
-            ' docker-compose.yml > docker-compose.yml.fixed
-
-            # Test the fixed file
-            if docker compose config --quiet docker-compose.yml.fixed 2>/dev/null; then
-                mv docker-compose.yml.fixed docker-compose.yml
-                log "✓ docker-compose.yml syntax fixed successfully"
-            else
-                log "Automatic fix failed, trying alternative approach..."
-                # Download a known working version from Supabase repo
-                log "Downloading fresh docker-compose.yml from Supabase repository..."
-                if curl -s -f https://raw.githubusercontent.com/supabase/supabase/master/docker/docker-compose.yml -o docker-compose.yml.fresh 2>/dev/null; then
-                    log "Downloaded fresh file, validating..."
-                    if docker compose config --quiet docker-compose.yml.fresh 2>/dev/null; then
-                        mv docker-compose.yml.fresh docker-compose.yml
-                        log "✓ Downloaded fresh docker-compose.yml successfully"
-                    else
-                        log "Fresh download has syntax errors too, trying manual fix..."
-                        # Manual fix for the known duplicate container_name issue
-                        sed -i '/container_name: supabase-analytics$/d' docker-compose.yml.fresh
-                        if docker compose config --quiet docker-compose.yml.fresh 2>/dev/null; then
-                            mv docker-compose.yml.fresh docker-compose.yml
-                            log "✓ Manually fixed docker-compose.yml successfully"
-                        else
-                            log "Manual fix failed, keeping original"
-                        fi
-                    fi
-                else
-                    log "Failed to download fresh docker-compose.yml"
-                    # Create a minimal, working docker-compose.yml from scratch
-                    log "Creating minimal working docker-compose.yml..."
-                    cat > docker-compose.yml << 'EOF'
+            log "docker-compose.yml has syntax errors, creating minimal working version..."
+            # Create a minimal, working docker-compose.yml from scratch
+            cat > docker-compose.yml << 'EOF'
 version: '3.8'
 services:
   db:
@@ -399,11 +347,10 @@ volumes:
   db-data:
   storage-data:
 EOF
-                    if docker compose config --quiet 2>/dev/null; then
-                        log "✓ Created minimal working docker-compose.yml successfully"
-                    else
-                        log "⚠ Even minimal compose file failed, this indicates deeper issues"
-                    fi
+            if docker compose config --quiet 2>/dev/null; then
+                log "✓ Created minimal working docker-compose.yml successfully"
+            else
+                log "⚠ Even minimal compose file failed, this indicates deeper issues"
             fi
         else
             log "✓ docker-compose.yml syntax is valid"
