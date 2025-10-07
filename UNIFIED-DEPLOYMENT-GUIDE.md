@@ -1,14 +1,36 @@
-# Unified Deployment Guide
+# Unified Deployment Guide - Single Approach Architecture
 
-This guide covers the new unified deployment architecture for the Albion Online Dashboard, combining enterprise features with robust infrastructure automation.
+This guide covers the unified deployment architecture for the Albion Online Dashboard, implementing the roadmap's recommended Supabase Self-Hosting + Cloudflare Workers architecture for optimal cost-effectiveness and performance.
 
 ## 🚀 Overview
 
-The unified deployment system supports multiple deployment modes:
-- **Development**: Local development with Docker Compose
-- **Staging**: Testing environment with full CI/CD pipeline
-- **Production**: Enterprise-grade deployment with Kubernetes or Docker Compose
-- **Enterprise**: Full-featured deployment with Coolify CI/CD, monitoring, and auto-scaling
+The unified deployment system implements a **single, standardized approach** based on the October 2025 roadmap:
+- **Supabase Self-Hosting**: Cost-effective, production-ready database and backend services
+- **Cloudflare Workers**: Serverless compute layer for API endpoints and data processing
+- **Single-Host Deployment**: Optimized for NVMe servers (Hetzner AX41-NVMe or similar)
+- **Roadmap Compliance**: Follows the official project roadmap for scalability and cost optimization
+
+## 🎯 Single Deployment Mode
+
+**All deployments now use the unified script with consistent architecture:**
+- Production-ready Supabase self-hosting with TimescaleDB optimization
+- Cloudflare Workers integration for serverless API endpoints
+- MinIO for S3-compatible storage
+- Caddy reverse proxy with automatic HTTPS
+- Automated backups and monitoring
+- No multiple deployment modes or complex configuration options
+
+### System Requirements
+- **OS**: Ubuntu 22.04 or 24.04 LTS
+- **Memory**: 16GB+ recommended (8GB minimum)
+- **Storage**: 40GB+ available disk space
+- **Network**: Public IP with domain name
+
+### Required Tools
+- Docker & Docker Compose
+- Git
+- curl, wget, unzip
+- OpenSSL
 
 ## 📋 Prerequisites
 
@@ -25,14 +47,11 @@ The unified deployment system supports multiple deployment modes:
 - OpenSSL
 
 ### Environment Variables
-Copy `.env.example` to your environment-specific file and configure:
+The unified deployment script handles all configuration automatically. Only basic domain and email settings are required:
 
 ```bash
-# Copy template
-cp scripts/infra/.env.example .env.production
-
-# Edit with your values
-nano .env.production
+export DOMAIN="yourdomain.com"
+export EMAIL="admin@yourdomain.com"
 ```
 
 ## 🔧 Quick Start
@@ -43,268 +62,137 @@ git clone https://github.com/your-username/albion-dashboard.git
 cd albion-dashboard
 ```
 
-### 2. Configure Environment
+### 2. Configure Basic Settings
 ```bash
-# Set up environment variables
+# Set minimal required environment variables
 export DOMAIN="yourdomain.com"
 export EMAIL="admin@yourdomain.com"
-export GITHUB_REPO="your-username/albion-dashboard"
-export GITHUB_TOKEN="your-github-token"
-export DEPLOYMENT_MODE="enterprise"  # or "basic", "k8s"
 ```
 
-### 3. Run Deployment
+### 3. Run Unified Deployment
 ```bash
-# Make script executable
-chmod +x scripts/infra/deploy-unified-enterprise.sh
-
-# Run deployment
-sudo bash scripts/infra/deploy-unified-enterprise.sh
+# Make script executable and run deployment
+chmod +x deploy-albion-unified.sh
+sudo bash deploy-albion-unified.sh
 ```
 
-## 🏗️ Deployment Modes
+## 🏗️ Deployment Architecture
 
-### Development Mode
-For local development and testing:
+The unified deployment implements the roadmap's recommended architecture:
 
-```bash
-export ENVIRONMENT="development"
-export DEPLOYMENT_MODE="basic"
-export ENABLE_COOLIFY="false"
-export ENABLE_MONITORING="false"
+### Core Components
+- **Supabase Self-Hosting**: PostgreSQL + PostgREST + Auth + Realtime + Storage
+- **TimescaleDB Integration**: Optimized for time-series data (market prices, PvP events)
+- **MinIO Storage**: S3-compatible object storage for Supabase buckets
+- **Caddy Proxy**: Reverse proxy with automatic HTTPS and security headers
+- **Cloudflare Workers**: Serverless API layer for data processing
 
-# Run development setup
-bash scripts/infra/environment-configs.sh development
-docker-compose up -d
-```
+### Cloudflare Workers Integration
+The deployment automatically sets up Cloudflare Workers for serverless API endpoints:
 
-### Staging Mode
-For testing before production:
-
-```bash
-export ENVIRONMENT="staging"
-export DEPLOYMENT_MODE="enterprise"
-export STAGING_DOMAIN="staging.yourdomain.com"
-
-# Deploy to staging
-sudo bash scripts/infra/deploy-unified-enterprise.sh
-```
-
-### Production Mode - Docker Compose
-Standard production deployment:
-
-```bash
-export ENVIRONMENT="production"
-export DEPLOYMENT_MODE="enterprise"
-export ENABLE_COOLIFY="true"
-export ENABLE_MONITORING="true"
-export ENABLE_SSL="true"
-
-# Deploy to production
-sudo bash scripts/infra/deploy-unified-enterprise.sh
-```
-
-### Production Mode - Kubernetes
-Enterprise Kubernetes deployment:
-
-```bash
-export ENVIRONMENT="production"
-export DEPLOYMENT_MODE="k8s"
-export K8S_NAMESPACE="albion-dashboard"
-export MIN_REPLICAS="3"
-export MAX_REPLICAS="20"
-
-# Deploy to Kubernetes
-sudo bash scripts/infra/deploy-unified-enterprise.sh
-```
-
-## 🔄 CI/CD Integration
-
-### GitHub Actions
-The deployment includes three GitHub Actions workflows:
-
-#### 1. Production Deployment (`.github/workflows/deploy-production.yml`)
-- **Triggers**: Push to `main`/`master`, manual dispatch
-- **Features**: Full validation, multi-mode deployment, health checks
-- **Modes**: `basic`, `enterprise`, `k8s`
-
-#### 2. Staging Deployment (`.github/workflows/deploy-staging.yml`)
-- **Triggers**: Push to `develop`/`staging`, PRs to main
-- **Features**: Staging environment testing, cleanup
-- **Modes**: `basic`, `enterprise`
-
-#### 3. Infrastructure Validation (`.github/workflows/infrastructure-validation.yml`)
-- **Triggers**: Changes to infrastructure files
-- **Features**: Script validation, security scanning, dry-run testing
-
-### Coolify CI/CD
-When `ENABLE_COOLIFY=true`, the system sets up:
-- Automated GitHub webhook integration
-- Zero-downtime deployments
-- Rollback capabilities
-- Resource monitoring
-
-## 🏛️ Architecture Components
-
-### Core Infrastructure
-- **Reverse Proxy**: Caddy with automatic HTTPS
-- **Database**: PostgreSQL with automated backups
-- **Cache**: Redis for session and data caching
-- **Storage**: Supabase for file storage and real-time features
-
-### Monitoring Stack (Optional)
-- **Metrics**: Prometheus + Grafana
-- **Logs**: Centralized logging with retention
-- **Alerts**: Slack/Discord notifications
-- **Health Checks**: Automated endpoint monitoring
-
-### Security Features
-- **SSL/TLS**: Automatic certificate management
-- **Firewall**: UFW with secure defaults
-- **Fail2Ban**: Intrusion prevention
-- **Security Headers**: CSP, HSTS, etc.
+- **API Endpoints**: Market prices, flip suggestions, PvP matchups
+- **Serverless Compute**: Cost-effective data processing and caching
+- **Global CDN**: Automatic edge caching for improved performance
+- **Environment Secrets**: Secure configuration management
 
 ## 📁 File Structure
 
 ```
+deploy-albion-unified.sh           # Main unified deployment script
+.env.example                      # Environment configuration template
 scripts/infra/
-├── deploy-unified-enterprise.sh    # Main deployment script
-├── environment-configs.sh          # Environment-specific configurations
-├── coolify-integration.sh          # Coolify CI/CD setup
-├── .env.example                   # Environment template
-└── docker-compose/               # Docker Compose configurations
-    ├── docker-compose.yml
-    ├── docker-compose.override.yml
-    └── monitoring.yml
+├── .env.example                  # Archived legacy environment configs
+└── ao-bin-integration.js         # Albion Online binary integration (kept for reference)
 
 .github/workflows/
-├── deploy-production.yml          # Production deployment
-├── deploy-staging.yml            # Staging deployment
-└── infrastructure-validation.yml  # Infrastructure validation
-
-k8s/
-├── app/                          # Application manifests
-├── postgres/                     # PostgreSQL setup
-├── redis/                        # Redis configuration
-└── supabase/                     # Supabase components
+└── [CI/CD workflows for future roadmap phases]
 ```
 
 ## 🔧 Configuration Management
 
-### Environment-Specific Settings
+The unified deployment script handles all configuration automatically:
 
-The system automatically detects and configures environments:
-
-```bash
-# Development
-- Local database and Redis
-- Debug mode enabled
-- No SSL/monitoring
-- Mock API keys
-
-# Staging
-- Remote database
-- SSL enabled
-- Basic monitoring
-- Real API keys required
-
-# Production
-- High availability setup
-- Full monitoring stack
-- Security hardening
-- Performance optimization
-```
-
-### Feature Flags
-
-Control deployment features via environment variables:
-
-```bash
-ENABLE_ANALYTICS=true      # Google Analytics integration
-ENABLE_MONITORING=true     # Prometheus/Grafana stack
-ENABLE_COOLIFY=true        # Coolify CI/CD platform
-ENABLE_SSL=true           # Automatic HTTPS certificates
-ENABLE_GITOPS=true        # GitOps workflow integration
-```
+- **Security Settings**: UFW firewall, fail2ban, automatic updates
+- **Database Optimization**: TimescaleDB for time-series data
+- **Storage Configuration**: MinIO buckets for Supabase
+- **Proxy Settings**: Caddy with HTTPS and security headers
+- **Monitoring Setup**: Basic health checks and logging
 
 ## 🚀 Deployment Process
 
-### Phase 1: Prerequisites
-- System requirements validation
-- Environment variable checks
-- Network connectivity tests
-- Security baseline setup
+The deployment follows a single, streamlined process:
 
-### Phase 2: Core Infrastructure
-- Docker and Docker Compose installation
-- Database setup (PostgreSQL)
-- Cache setup (Redis)
-- Network configuration
+### Phase 1: System Setup
+- Ubuntu package updates and security hardening
+- UFW firewall configuration with secure defaults
+- Automatic security updates setup
 
-### Phase 3: Application Deployment
-- Application container build/pull
-- Database migrations
-- Configuration deployment
-- Service startup
+### Phase 2: Docker Runtime
+- Docker Engine installation and configuration
+- Docker Compose plugin setup
 
-### Phase 4: Reverse Proxy & SSL
-- Caddy installation and configuration
-- Automatic HTTPS certificate generation
-- Domain routing setup
-- Security headers configuration
+### Phase 3: Supabase Self-Hosting
+- Supabase services deployment (PostgreSQL, PostgREST, Auth, Realtime, Storage)
+- TimescaleDB extension for time-series optimization
+- Albion Online database schema creation
 
-### Phase 5: CI/CD Integration (Optional)
-- Coolify installation and setup
-- GitHub webhook configuration
-- Automated deployment pipeline
-- Rollback mechanism setup
+### Phase 4: MinIO Storage
+- S3-compatible storage server setup
+- Bucket creation for Supabase integration
 
-### Phase 6: Monitoring & Observability (Optional)
-- Prometheus metrics collection
-- Grafana dashboard setup
-- Log aggregation configuration
-- Alert rule deployment
+### Phase 5: Caddy Proxy
+- Reverse proxy configuration with automatic HTTPS
+- Security headers and rate limiting
+
+### Phase 6: Cloudflare Workers
+- Worker script generation for API endpoints
+- Deployment configuration setup
+
+### Phase 7: Monitoring & Backups
+- Daily automated backup scripts
+- System monitoring and health checks
 
 ## 🔍 Monitoring & Maintenance
 
 ### Health Checks
-The system includes comprehensive health monitoring:
+The system includes basic health monitoring:
 
 ```bash
 # Application health
-curl https://yourdomain.com/api/health
+curl https://yourdomain.com/health
 
 # Database connectivity
 curl https://yourdomain.com/api/health/db
 
-# Cache status
-curl https://yourdomain.com/api/health/cache
-
-# Supabase integration
-curl https://yourdomain.com/api/health/supabase
+# Supabase services status
+docker ps --filter name=supabase
 ```
 
-### Monitoring Dashboards
-- **Grafana**: `https://grafana.yourdomain.com`
-- **Prometheus**: `https://prometheus.yourdomain.com`
-- **Coolify**: `https://coolify.yourdomain.com`
+### Backup Management
+```bash
+# Run manual backup
+/opt/backup-albion.sh
 
-### Log Management
+# Check backup logs
+tail -f /var/log/cron.log
+
+# List available backups
+ls -la /opt/backups/
+```
+
+### Log Monitoring
 ```bash
 # Application logs
-docker-compose logs -f app
-
-# Database logs
-docker-compose logs -f postgres
-
-# Reverse proxy logs
-docker-compose logs -f caddy
+docker-compose logs -f supabase
 
 # System logs
 journalctl -f -u docker
+
+# Caddy access logs
+tail -f /var/log/caddy/access.log
 ```
 
-## 🛠️ Troubleshooting
+## 🔧 Troubleshooting
 
 ### Common Issues
 
@@ -314,83 +202,65 @@ journalctl -f -u docker
 nslookup yourdomain.com
 
 # Verify Caddy configuration
-docker-compose exec caddy caddy validate --config /etc/caddy/Caddyfile
+docker exec caddy caddy validate --config /etc/caddy/Caddyfile
 ```
 
 #### 2. SSL Certificate Issues
 ```bash
 # Check certificate status
-docker-compose exec caddy caddy list-certificates
+curl -I https://yourdomain.com
 
-# Force certificate renewal
-docker-compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+# Force certificate renewal (if needed)
+docker exec caddy caddy reload
 ```
 
 #### 3. Database Connection Problems
 ```bash
 # Check database status
-docker-compose exec postgres pg_isready
+docker exec supabase-db pg_isready -U postgres
 
 # View database logs
-docker-compose logs postgres
-
-# Test connection
-docker-compose exec app npm run db:test
+docker logs supabase-db
 ```
 
-#### 4. Coolify Integration Issues
+#### 4. Cloudflare Workers Issues
 ```bash
-# Check Coolify status
-curl -f https://coolify.yourdomain.com/api/health
-
-# Verify webhook configuration
-curl -X POST https://coolify.yourdomain.com/webhooks/github \
-  -H "Content-Type: application/json" \
-  -d '{"test": true}'
+# Check worker deployment
+cd /opt/cloudflare-workers
+./deploy.sh --dry-run
 ```
 
 ### Debug Mode
-Enable debug logging for detailed troubleshooting:
+Enable debug logging:
 
 ```bash
 export DEBUG=true
-export LOG_LEVEL=debug
 
 # Re-run deployment with debug output
-sudo bash scripts/infra/deploy-unified-enterprise.sh
+sudo bash deploy-albion-unified.sh
 ```
 
 ## 🔄 Updates & Maintenance
-
-### Automated Updates
-The system supports automated updates via:
-- GitHub Actions on code changes
-- Coolify webhooks for continuous deployment
-- Scheduled maintenance windows
 
 ### Manual Updates
 ```bash
 # Pull latest changes
 git pull origin main
 
-# Update containers
-docker-compose pull
-docker-compose up -d
+# Update Supabase services
+cd /opt/supabase && git pull
+docker compose up -d
 
-# Run database migrations
-docker-compose exec app npm run db:migrate
+# Run database migrations (if needed)
+# Check deployment summary for migration instructions
 ```
 
-### Backup & Recovery
+### Backup Verification
 ```bash
-# Database backup
-docker-compose exec postgres pg_dump -U postgres albion_dashboard > backup.sql
-
-# Restore database
-docker-compose exec -T postgres psql -U postgres albion_dashboard < backup.sql
-
-# Configuration backup
-tar -czf config-backup.tar.gz .env docker-compose.yml
+# Test backup restoration
+# 1. Create test environment
+# 2. Restore from latest backup
+# 3. Verify data integrity
 ```
 
 ## 🔐 Security Considerations
@@ -404,45 +274,27 @@ tar -czf config-backup.tar.gz .env docker-compose.yml
 - HTTPS-only with HSTS headers
 - CSP headers for XSS protection
 - Rate limiting on API endpoints
-- Secure session management
 
 ### Data Protection
 - Encrypted database connections
 - Secure environment variable handling
 - Regular automated backups
-- Access logging and monitoring
 
-## 📞 Support & Contributing
+## 📞 Support & Documentation
 
 ### Getting Help
-1. Check this documentation
-2. Review GitHub Issues
-3. Check application logs
+1. Check this unified deployment guide
+2. Review deployment logs in `/opt/albion-deployment-summary.txt`
+3. Check application and system logs
 4. Contact the development team
 
-### Contributing
-1. Fork the repository
-2. Create a feature branch
-3. Test your changes in staging
-4. Submit a pull request
-
-### Reporting Issues
-Include the following information:
-- Deployment mode and environment
-- Error messages and logs
-- Steps to reproduce
-- System specifications
-
----
-
-## 📚 Additional Resources
-
-- [API Documentation](./API-DOCS.md)
-- [Development Setup](./VSCODE_SETUP.md)
+### Additional Resources
+- [Project Roadmap](./Docs/ROADMAP.md)
 - [Security Hardening](./SECURITY-HARDENING.md)
-- [Performance Optimization](./PERFORMANCE.md)
-- [Kubernetes Guide](./INFRA-K3S.md)
+- [Environment Variables](./ENVIRONMENT-VARIABLES.md)
 
 ---
 
 *Last updated: $(date -u +"%Y-%m-%d %H:%M:%S UTC")*
+
+**Note**: This deployment guide implements the single, unified approach as specified in the October 2025 roadmap. All previous multi-mode deployment scripts have been archived for reference.
