@@ -939,13 +939,31 @@ EOF
 setup_redis() {
     log "🔴 === PHASE 10: Redis Caching Setup ==="
 
-    # Check for existing Redis containers and clean them up
-    log "Checking for existing Redis containers..."
-    if docker ps -a --format 'table {{.Names}}' | grep -q "^redis$"; then
-        log "Removing existing Redis container..."
-        docker stop redis >/dev/null 2>&1 || true
-        docker rm redis >/dev/null 2>&1 || true
-    fi
+    # EXTREME CLEANUP: Remove ALL Redis-related containers and networks
+    log "Performing extreme Redis cleanup..."
+
+    # Stop and remove ALL containers that might be using Redis
+    log "Stopping all Redis-related containers..."
+    docker ps -a --filter "name=redis" --format "{{.Names}}" | while read -r container; do
+        log "Stopping container: $container"
+        docker stop "$container" 2>/dev/null || true
+        docker rm "$container" 2>/dev/null || true
+    done
+
+    # Also check for any containers that might have "redis" in their name or image
+    docker ps -a --format "{{.Names}} {{.Image}}" | grep -i redis | while read -r container image; do
+        log "Found Redis-related container: $container ($image)"
+        docker stop "$container" 2>/dev/null || true
+        docker rm "$container" 2>/dev/null || true
+    done
+
+    # Force cleanup any dangling containers or networks
+    log "Cleaning up Docker resources..."
+    docker container prune -f >/dev/null 2>&1 || true
+    docker network prune -f >/dev/null 2>&1 || true
+
+    # Wait for cleanup to complete
+    sleep 5
 
     # Check if port 6379 is in use by other processes
     if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
@@ -1044,6 +1062,15 @@ setup_redis() {
     fi
 
     log "✅ Port 6379 confirmed free - proceeding with Redis deployment"
+
+    # FINAL PORT VERIFICATION before Docker run
+    if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
+        log "❌ CRITICAL: Port 6379 became occupied during cleanup! Aborting Redis deployment."
+        log "🔍 Checking what is now using port 6379:"
+        ss -tlnp | grep ":6379 " 2>/dev/null || lsof -i :6379 2>/dev/null || echo "   Unable to determine process"
+        error "Port conflict detected at deployment time. Please resolve manually."
+        exit 1
+    fi
 
     # Start Redis container with 2025 security and performance standards
     log "Starting Redis server with enhanced security..."
