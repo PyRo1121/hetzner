@@ -21,6 +21,9 @@ set -euo pipefail
 log() { echo "[hcloud-fw] $*"; }
 err() { echo "[hcloud-fw:ERROR] $*" >&2; }
 
+# Prefer /usr/local/bin over system paths (sudo may prioritize /usr/bin)
+export PATH="/usr/local/bin:$PATH"
+
 # Minimum hcloud CLI version required for --rules-from support
 HC_VER="v1.42.0"
 
@@ -147,12 +150,35 @@ main() {
 
   # Create or update firewall
   FW_ID=$(hcloud firewall list -o columns=ID,NAME | awk -v name="$FIREWALL_NAME" '$2==name {print $1}')
-  if [[ -z "$FW_ID" ]]; then
-    log "Creating new firewall: $FIREWALL_NAME"
-    FW_ID=$(echo "$RULES" | hcloud firewall create --name "$FIREWALL_NAME" --rules-from - -o columns=ID | tail -n1)
+  if hcloud firewall create --help 2>&1 | grep -q -- "--rules-from"; then
+    if [[ -z "$FW_ID" ]]; then
+      log "Creating new firewall: $FIREWALL_NAME"
+      FW_ID=$(echo "$RULES" | hcloud firewall create --name "$FIREWALL_NAME" --rules-from - -o columns=ID | tail -n1)
+    else
+      log "Updating firewall: $FIREWALL_NAME"
+      # Prefer set-rules if available; fallback to update
+      if hcloud firewall set-rules --help >/dev/null 2>&1; then
+        echo "$RULES" | hcloud firewall set-rules "$FW_ID" --rules-from - >/dev/null
+      else
+        echo "$RULES" | hcloud firewall update "$FW_ID" --rules-from - >/dev/null
+      fi
+    fi
   else
-    log "Updating firewall: $FIREWALL_NAME"
-    echo "$RULES" | hcloud firewall update "$FW_ID" --rules-from - >/dev/null
+    # Legacy CLI fallback: construct --rule flags from JSON and create/recreate
+    log "Legacy hcloud CLI detected (no --rules-from). Building --rule flags."
+    mapfile -t RULE_STRS < <(echo "$RULES" | jq -r '.rules[] | "direction=\(.direction),protocol=\(.protocol)" + (if .port then ",port=\(.port)" else "" end) + ",source_ips=" + (.source_ips | join(","))')
+    RULE_ARGS=()
+    for r in "${RULE_STRS[@]}"; do
+      RULE_ARGS+=(--rule "$r")
+    done
+    if [[ -z "$FW_ID" ]]; then
+      log "Creating new firewall (legacy flags): $FIREWALL_NAME"
+      FW_ID=$(hcloud firewall create --name "$FIREWALL_NAME" "${RULE_ARGS[@]}" -o columns=ID | tail -n1)
+    else
+      log "Recreating firewall to apply updated rules (legacy flags): $FIREWALL_NAME"
+      hcloud firewall delete "$FW_ID"
+      FW_ID=$(hcloud firewall create --name "$FIREWALL_NAME" "${RULE_ARGS[@]}" -o columns=ID | tail -n1)
+    fi
   fi
 
   log "Attaching firewall ($FW_ID) to server ($SERVER_ID)"
