@@ -110,13 +110,13 @@ setup_system() {
 
     # Update system packages
     log "Updating system packages..."
-    retry_with_backoff 3 5 "apt-get update -y"
-    retry_with_backoff 3 5 "apt-get upgrade -y"
-    retry_with_backoff 3 5 "apt-get autoremove -y"
+    retry_with_backoff 3 5 "/usr/bin/apt-get update -y"
+    retry_with_backoff 3 5 "/usr/bin/apt-get upgrade -y"
+    retry_with_backoff 3 5 "/usr/bin/apt-get autoremove -y"
 
     # Install essential packages
     log "Installing essential packages..."
-    retry_with_backoff 3 5 "apt-get install -y" \
+    retry_with_backoff 3 5 "/usr/bin/apt-get install -y" \
         ufw fail2ban unattended-upgrades apt-transport-https \
         ca-certificates curl wget jq unzip htop iotop ncdu \
         git openssl
@@ -176,7 +176,7 @@ setup_docker() {
 
     # Install Docker Compose plugin
     log "Installing Docker Compose plugin..."
-    apt-get install -y docker-compose-plugin
+    /usr/bin/apt-get install -y docker-compose-plugin
 
     # Start and enable Docker
     systemctl enable --now docker
@@ -317,8 +317,8 @@ setup_caddy() {
     log "Installing Caddy $CADDY_VERSION..."
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | tee /etc/apt/trusted.gpg.d/caddy-stable.asc
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
-    apt-get update
-    apt-get install -y caddy
+    /usr/bin/apt-get update
+    /usr/bin/apt-get install -y caddy
 
     # Configure Caddyfile for Supabase
     log "Configuring Caddy reverse proxy..."
