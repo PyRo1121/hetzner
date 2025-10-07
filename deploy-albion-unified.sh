@@ -752,7 +752,7 @@ setup_grafana() {
     fi
 
     success "✅ Grafana dashboards setup completed"
-}
+
 
     success "✅ Redis caching setup completed"
 }
