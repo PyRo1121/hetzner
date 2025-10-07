@@ -1240,6 +1240,10 @@ setup_grafana() {
 
     # Create Grafana directories
     mkdir -p /opt/grafana/data /opt/grafana/logs /opt/grafana/plugins /opt/grafana/dashboards /opt/grafana/provisioning
+    # Ensure proper permissions for Grafana data directory
+    chmod -R 755 /opt/grafana/data
+    # Try to set ownership, but don't fail if not possible
+    chown -R 472:472 /opt/grafana/data 2>/dev/null || true
 
     # Create Grafana configuration for 2025 standards
     cat >/opt/grafana/grafana.ini <<EOF
@@ -1332,8 +1336,15 @@ EOF
     # Wait for Grafana to be ready
     sleep 15
 
-    # Verify Grafana is running
+    # Verify Grafana is running and check logs if failed
     if ! docker ps | grep -q grafana; then
+        log "❌ Grafana container not running, checking logs..."
+        docker logs grafana 2>&1 | head -20 || log "No logs available"
+        log "Common Grafana startup issues:"
+        log "- Port conflicts (check if port 3000 is free)"
+        log "- Database/permission issues with /opt/grafana/data"
+        log "- Configuration syntax errors"
+        log "- Insufficient disk space"
         error "Grafana failed to start"
         exit 1
     fi
