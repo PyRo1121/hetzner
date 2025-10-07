@@ -1102,7 +1102,11 @@ setup_prometheus() {
     fi
 
     # Create Prometheus configuration with 2025 observability standards
-    mkdir -p /opt/prometheus
+    mkdir -p /opt/prometheus/data
+    # Ensure proper permissions for Prometheus data directory
+    chmod -R 755 /opt/prometheus/data
+    # Try to set ownership, but don't fail if not possible
+    chown -R 65534:65534 /opt/prometheus/data 2>/dev/null || true
 
     cat >/opt/prometheus/prometheus.yml <<EOF
 global:
@@ -1198,9 +1202,14 @@ EOF
         -v /opt/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml \
         -v /opt/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml \
         -v /opt/prometheus/data:/prometheus \
+        --user root \
         --memory 256m \
         --cpus 0.5 \
-        prom/prometheus
+        prom/prometheus \
+        --config.file=/etc/prometheus/prometheus.yml \
+        --storage.tsdb.path=/prometheus \
+        --web.listen-address=:9090 \
+        --storage.tsdb.retention.time=15d
 
     # Wait for Prometheus to be ready with better error checking
     sleep 10
