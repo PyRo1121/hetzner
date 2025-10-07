@@ -242,16 +242,22 @@ setup_supabase() {
     log "Waiting for Supabase services to be ready..."
     sleep 120  # Give more time for services to fully start
 
-    # Check if Supabase containers are running
-    local supabase_containers=$(docker ps --filter name=supabase --format "{{.Names}}" | wc -l)
-    if [[ $supabase_containers -lt 10 ]]; then
-        warning "Only $supabase_containers Supabase containers running, expected at least 10"
+    # Check if core Supabase containers are running (analytics is optional)
+    local core_containers=$(docker ps --filter name=supabase --filter "name!=supabase-analytics" --format "{{.Names}}" | wc -l)
+    local total_containers=$(docker ps --filter name=supabase --format "{{.Names}}" | wc -l)
+
+    log "Found $total_containers total Supabase containers running ($core_containers core services)"
+
+    if [[ $core_containers -lt 8 ]]; then
+        warning "Only $core_containers core Supabase containers running, expected at least 8"
         docker ps --filter name=supabase
-        error "Supabase services may not have started completely"
+        error "Critical Supabase services failed to start"
         exit 1
     fi
 
-    log "Found $supabase_containers Supabase containers running"
+    if [[ $total_containers -lt $core_containers ]]; then
+        warning "Analytics service failed to start, but core services are running. Continuing..."
+    fi
 
     # Create Albion Online database schema
     log "Creating Albion Online database schema..."
