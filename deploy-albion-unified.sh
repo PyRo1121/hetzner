@@ -228,16 +228,45 @@ setup_supabase() {
     sed -i "s|^ANON_KEY=.*|ANON_KEY=$ANON_KEY|" .env
     sed -i "s|^SERVICE_ROLE_KEY=.*|SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY|" .env
 
-    # Configure for production use with resource optimizations
-    echo "POSTGRES_SHARED_BUFFERS=512MB" >> .env
-    echo "POSTGRES_EFFECTIVE_CACHE_SIZE=2GB" >> .env
-    echo "POSTGRES_WORK_MEM=16MB" >> .env
-    echo "POSTGRES_MAINTENANCE_WORK_MEM=128MB" >> .env
-    # Disable analytics service which is resource-intensive and often problematic
-    echo "ANALYTICS_ENABLED=false" >> .env
-    # Optimize for single-server deployment
-    echo "IMGPROXY_ENABLE_WEBP_DETECTION=false" >> .env
-    echo "IMGPROXY_ENABLE_CLIENT_HINTS_SUPPORT=false" >> .env
+    # Fix common Supabase docker-compose.yml syntax errors
+    if [[ -f docker-compose.yml ]]; then
+        log "Fixing common Supabase docker-compose.yml syntax issues..."
+        cp docker-compose.yml docker-compose.yml.original
+
+        # Fix duplicate container_name keys (common Supabase issue)
+        # Remove duplicate container_name entries, keeping only the first one
+        awk '
+        BEGIN { in_service = 0; container_name_seen = 0 }
+        /^  [a-zA-Z][a-zA-Z0-9_-]*:/ {
+            in_service = 1
+            container_name_seen = 0
+            print
+            next
+        }
+        /^    container_name:/ {
+            if (!container_name_seen) {
+                container_name_seen = 1
+                print
+            }
+            next
+        }
+        /^  [a-zA-Z]/ && in_service && !/^    / {
+            in_service = 0
+            container_name_seen = 0
+        }
+        { print }
+        ' docker-compose.yml > docker-compose.yml.fixed
+
+        mv docker-compose.yml.fixed docker-compose.yml
+
+        # Validate the fixed file
+        if docker compose config --quiet 2>/dev/null; then
+            log "✓ docker-compose.yml syntax fixed successfully"
+        else
+            log "⚠ docker-compose.yml still has issues, using original"
+            cp docker-compose.yml.original docker-compose.yml
+        fi
+    fi
 
     # Start Supabase services (analytics disabled via environment)
     log "Starting Supabase services..."
