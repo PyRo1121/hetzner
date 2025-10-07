@@ -1092,6 +1092,7 @@ setup_redis() {
 
 setup_prometheus() {
     log "📊 === PHASE 11: Prometheus Metrics Setup ==="
+    log "⚠️  Note: Docker Hub has rate limits (100 pulls/6h unauthenticated). Deployment may pause for retries."
 
     # Check for existing Prometheus containers and clean them up
     log "Checking for existing Prometheus containers..."
@@ -1196,7 +1197,7 @@ EOF
 
     # Start Prometheus container with enhanced configuration
     log "Starting Prometheus server..."
-    docker run -d \
+    if ! docker run -d \
         --name prometheus \
         --network host \
         -v /opt/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml \
@@ -1209,7 +1210,25 @@ EOF
         --config.file=/etc/prometheus/prometheus.yml \
         --storage.tsdb.path=/prometheus \
         --web.listen-address=:9090 \
-        --storage.tsdb.retention.time=15d
+        --storage.tsdb.retention.time=15d; then
+        log "❌ Docker pull rate limit hit for Prometheus. Waiting 60 seconds before retry..."
+        sleep 60
+        log "Retrying Prometheus deployment..."
+        docker run -d \
+            --name prometheus \
+            --network host \
+            -v /opt/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml \
+            -v /opt/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml \
+            -v /opt/prometheus/data:/prometheus \
+            --user root \
+            --memory 256m \
+            --cpus 0.5 \
+            prom/prometheus \
+            --config.file=/etc/prometheus/prometheus.yml \
+            --storage.tsdb.path=/prometheus \
+            --web.listen-address=:9090 \
+            --storage.tsdb.retention.time=15d
+    fi
 
     # Wait for Prometheus to be ready with better error checking
     sleep 10
@@ -1237,6 +1256,7 @@ EOF
 
 setup_grafana() {
     log "📈 === PHASE 12: Grafana Dashboards Setup ==="
+    log "⚠️  Note: Docker Hub has rate limits (100 pulls/6h unauthenticated). Deployment may pause for retries."
 
     # Create Grafana directories
     mkdir -p /opt/grafana/data /opt/grafana/logs /opt/grafana/plugins /opt/grafana/dashboards /opt/grafana/provisioning
@@ -1319,7 +1339,7 @@ EOF
 
     # Start Grafana container with enhanced security
     log "Starting Grafana server..."
-    docker run -d \
+    if ! docker run -d \
         --name grafana \
         --network host \
         -e GF_SECURITY_ADMIN_PASSWORD=admin123 \
@@ -1331,7 +1351,24 @@ EOF
         -v /opt/grafana/grafana.ini:/etc/grafana/grafana.ini \
         --memory 512m \
         --cpus 0.5 \
-        grafana/grafana:11.2.0
+        grafana/grafana:11.2.0; then
+        log "❌ Docker pull rate limit hit for Grafana. Waiting 60 seconds before retry..."
+        sleep 60
+        log "Retrying Grafana deployment..."
+        docker run -d \
+            --name grafana \
+            --network host \
+            -e GF_SECURITY_ADMIN_PASSWORD=admin123 \
+            -e GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel \
+            -v /opt/grafana/data:/var/lib/grafana \
+            -v /opt/grafana/logs:/var/log/grafana \
+            -v /opt/grafana/plugins:/var/lib/grafana/plugins \
+            -v /opt/grafana/provisioning:/etc/grafana/provisioning \
+            -v /opt/grafana/grafana.ini:/etc/grafana/grafana.ini \
+            --memory 512m \
+            --cpus 0.5 \
+            grafana/grafana:11.2.0
+    fi
 
     # Wait for Grafana to be ready
     sleep 15
