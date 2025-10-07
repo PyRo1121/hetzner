@@ -26,6 +26,7 @@ export PATH="/usr/local/bin:$PATH"
 
 # Minimum hcloud CLI version required for --rules-from support
 HC_VER="v1.42.0"
+HCLOUD_API="https://api.hetzner.cloud/v1"
 
 require_var() {
   local name="$1"; local val
@@ -105,6 +106,43 @@ install_hcloud_cli() {
   hash -r
 }
 
+# ---- REST API helpers (fallback for legacy CLI) ----
+api_get_firewall_id_by_name() {
+  local name="$1"
+  curl -sS -H "Authorization: Bearer $HCLOUD_TOKEN" "$HCLOUD_API/firewalls?per_page=50" \
+    | jq -r --arg name "$name" '.firewalls[] | select(.name == $name) | .id' \
+    | head -n1
+}
+
+api_create_firewall() {
+  local name="$1"; local rules_json_array="$2"; local server_id="$3"
+  local body
+  body=$(jq -n --arg name "$name" --argjson rules $rules_json_array --arg sid "$server_id" '{
+    name: $name,
+    rules: $rules,
+    apply_to: [ { server: { id: ($sid|tonumber) } } ]
+  }')
+  curl -sS -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
+    -d "$body" "$HCLOUD_API/firewalls" \
+    | jq -r '.firewall.id'
+}
+
+api_set_firewall_rules() {
+  local fw_id="$1"; local rules_json_array="$2"
+  local body
+  body=$(jq -n --argjson rules $rules_json_array '{ rules: $rules }')
+  curl -sS -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
+    -d "$body" "$HCLOUD_API/firewalls/$fw_id/actions/set_rules" >/dev/null
+}
+
+api_apply_firewall_to_server() {
+  local fw_id="$1"; local server_id="$2"
+  local body
+  body=$(jq -n --arg sid "$server_id" '{ apply_to: [ { server: { id: ($sid|tonumber) } } ] }')
+  curl -sS -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
+    -d "$body" "$HCLOUD_API/firewalls/$fw_id/actions/apply_to_resources" >/dev/null
+}
+
 main() {
   export FIREWALL_NAME=${FIREWALL_NAME:-supabase-poc-fw}
   export IP_ALLOWLIST_SSH=${IP_ALLOWLIST_SSH:-0.0.0.0/0}
@@ -164,25 +202,33 @@ main() {
       fi
     fi
   else
-    # Legacy CLI fallback: construct --rule flags from JSON and create/recreate
-    log "Legacy hcloud CLI detected (no --rules-from). Building --rule flags."
-    mapfile -t RULE_STRS < <(echo "$RULES" | jq -r '.rules[] | "direction=\(.direction),protocol=\(.protocol)" + (if .port then ",port=\(.port)" else "" end) + ",source_ips=" + (.source_ips | join(","))')
-    RULE_ARGS=()
-    for r in "${RULE_STRS[@]}"; do
-      RULE_ARGS+=(--rule "$r")
-    done
-    if [[ -z "$FW_ID" ]]; then
-      log "Creating new firewall (legacy flags): $FIREWALL_NAME"
-      FW_ID=$(hcloud firewall create --name "$FIREWALL_NAME" "${RULE_ARGS[@]}" -o columns=ID | tail -n1)
+    # Legacy CLI fallback: use Hetzner Cloud REST API to set rules and attach
+    log "Legacy hcloud CLI detected (no --rules-from). Using REST API fallback."
+    RULES_ARRAY=$(echo "$RULES" | jq -c '.rules')
+    # Find firewall by name via API
+    FW_ID_API=$(api_get_firewall_id_by_name "$FIREWALL_NAME" || true)
+    if [[ -z "${FW_ID_API:-}" ]]; then
+      log "Creating new firewall via API: $FIREWALL_NAME"
+      FW_ID_API=$(api_create_firewall "$FIREWALL_NAME" "$RULES_ARRAY" "$SERVER_ID")
+      if [[ -z "${FW_ID_API:-}" ]]; then
+        err "API create failed: could not obtain firewall ID"; exit 1
+      fi
     else
-      log "Recreating firewall to apply updated rules (legacy flags): $FIREWALL_NAME"
-      hcloud firewall delete "$FW_ID"
-      FW_ID=$(hcloud firewall create --name "$FIREWALL_NAME" "${RULE_ARGS[@]}" -o columns=ID | tail -n1)
+      log "Updating firewall rules via API: $FIREWALL_NAME ($FW_ID_API)"
+      api_set_firewall_rules "$FW_ID_API" "$RULES_ARRAY"
+      log "Attaching firewall via API to server ($SERVER_ID)"
+      api_apply_firewall_to_server "$FW_ID_API" "$SERVER_ID"
     fi
+    FW_ID=${FW_ID_API}
   fi
 
   log "Attaching firewall ($FW_ID) to server ($SERVER_ID)"
-  hcloud firewall apply-to-resource "$FW_ID" --type server --server "$SERVER_ID" >/dev/null
+  if hcloud firewall apply-to-resource --help >/dev/null 2>&1; then
+    hcloud firewall apply-to-resource "$FW_ID" --type server --server "$SERVER_ID" >/dev/null
+  else
+    # Already handled via API in legacy branch; no-op
+    :
+  fi
 
   log "Firewall configured and attached. Rules:"
   hcloud firewall describe "$FW_ID" | sed -n '/rules:/,$p'

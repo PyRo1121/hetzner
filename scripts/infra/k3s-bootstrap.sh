@@ -132,7 +132,7 @@ install_db_pool() {
     --set primary.persistence.size=20Gi
 
   log "Installing PGBouncer"
-  helm upgrade --install pgbouncer bitnami/pgbouncer -n platform \
+  helm upgrade --install my-release one-acre-fund/pgbouncer -n platform \
     --set auth.username=postgres \
     --set auth.password=$(kubectl get secret -n platform postgres-postgresql -o jsonpath='{.data.postgres-password}' | base64 -d) \
     --set database.host=postgres-postgresql.platform.svc.cluster.local \
