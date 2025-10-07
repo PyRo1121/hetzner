@@ -1,0 +1,274 @@
+# Environment Variables & GitHub Secrets Configuration
+
+This document outlines all the environment variables and GitHub secrets required for the complete Albion Online Enterprise Dashboard deployment with Kubernetes CI/CD.
+
+## 🔑 GitHub Secrets (Required for CI/CD)
+
+### Supabase Configuration
+```bash
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your_anon_key_here
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+```
+
+### Authentication & Security
+```bash
+NEXTAUTH_SECRET=your_32_character_random_secret
+NEXTAUTH_URL=https://pyro1121.com
+```
+
+### Redis Database
+```bash
+REDIS_URL=redis://localhost:6379
+# For production Redis (if using cloud Redis):
+REDIS_URL=redis://username:password@hostname:port
+```
+
+### Cloudflare CDN Integration
+```bash
+CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
+CLOUDFLARE_API_TOKEN=your_cloudflare_api_token
+CLOUDFLARE_ZONE_ID=your_zone_id_for_pyro1121.com
+```
+
+### Kubernetes Cluster Access
+```bash
+KUBE_CONFIG=<base64_encoded_kubeconfig>
+# Generate with: cat ~/.kube/config | base64 -w 0
+```
+
+### Hetzner Cloud (for infrastructure provisioning)
+```bash
+HCLOUD_TOKEN=your_hetzner_cloud_api_token
+HCLOUD_SERVER_ID=your_server_id
+```
+
+### Coolify CI/CD Platform
+```bash
+COOLIFY_TOKEN=your_coolify_api_token
+```
+
+### PostgreSQL Database
+```bash
+POSTGRES_PASSWORD=your_secure_postgres_password
+```
+
+## 🖥️ Server Environment Variables
+
+### Production Server (.env.production)
+Create `/opt/albion-dashboard/.env.production` on your server:
+
+```bash
+# Supabase Configuration
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key_here
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+
+# Authentication
+NEXTAUTH_SECRET=your_32_character_random_secret
+NEXTAUTH_URL=https://pyro1121.com
+
+# Redis Configuration
+REDIS_URL=redis://localhost:6379
+
+# Cloudflare CDN
+CLOUDFLARE_ACCOUNT_ID=your_cloudflare_account_id
+CLOUDFLARE_API_TOKEN=your_cloudflare_api_token
+
+# Application Configuration
+NODE_ENV=production
+NEXT_PUBLIC_APP_URL=https://pyro1121.com
+
+# Admin Configuration (for Coolify)
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=your_secure_admin_password
+
+# Domain Configuration
+DOMAIN=pyro1121.com
+
+# Optional: Monitoring & Analytics
+SENTRY_DSN=https://your-sentry-dsn@sentry.io/project
+SENTRY_AUTH_TOKEN=your_sentry_auth_token
+SENTRY_ORG=your_org
+SENTRY_PROJECT=albion-dashboard
+
+# Optional: External APIs (if using premium features)
+AODP_NATS_TOKEN=your_aodp_token
+```
+
+### Data Ingestion Service Environment
+Create `/opt/albion-ingestion/.env` on your server:
+
+```bash
+# Database Connections
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+REDIS_URL=redis://localhost:6379
+
+# Application Settings
+NODE_ENV=production
+LOG_LEVEL=info
+
+# Optional: Rate Limiting
+API_RATE_LIMIT=1000
+REDIS_CACHE_TTL=300
+```
+
+## 🚀 Deployment Environment Variables
+
+### Infrastructure Setup Script
+For the initial deployment script (`deploy-albion-enterprise-2025.sh`):
+
+```bash
+# Domain and SSL
+DOMAIN=pyro1121.com
+EMAIL=your@email.com
+
+# Hetzner Cloud
+HCLOUD_TOKEN=your_hetzner_cloud_api_token
+HCLOUD_SERVER_ID=your_server_id
+
+# Supabase (if using hosted)
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
+SUPABASE_ANON_KEY=your_anon_key_here
+
+# Redis (if using cloud Redis)
+REDIS_URL=redis://username:password@hostname:port
+
+# GitHub Integration
+GITHUB_REPO=PyRo1121/hetzner
+GITHUB_TOKEN=your_github_personal_access_token
+
+# S3 Storage (optional)
+S3_ENDPOINT=https://your-s3-endpoint.com
+S3_ACCESS_KEY=your_s3_access_key
+S3_SECRET_KEY=your_s3_secret_key
+S3_BUCKET=your_bucket_name
+
+# Application Secrets
+NEXTAUTH_SECRET=your_32_character_random_secret
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=your_secure_admin_password
+```
+
+## 🔧 Service-Specific Variables
+
+### PostgreSQL with TimescaleDB
+```bash
+POSTGRES_DB=albion
+POSTGRES_USER=albion
+POSTGRES_PASSWORD=your_secure_postgres_password
+PGDATA=/var/lib/postgresql/data/pgdata
+```
+
+### Redis Configuration
+```bash
+REDIS_PASSWORD=your_redis_password
+REDIS_MAXMEMORY=4gb
+REDIS_MAXMEMORY_POLICY=allkeys-lru
+```
+
+## 📊 Monitoring & Analytics (Optional)
+
+### Prometheus Configuration
+```bash
+PROMETHEUS_RETENTION_TIME=48h
+PROMETHEUS_RETENTION_SIZE=2GB
+```
+
+### Grafana Configuration
+```bash
+GF_SECURITY_ADMIN_USER=admin
+GF_SECURITY_ADMIN_PASSWORD=your_grafana_password
+GF_USERS_ALLOW_SIGN_UP=false
+```
+
+### Sentry Error Tracking
+```bash
+SENTRY_DSN=https://your-dsn@sentry.io/project
+SENTRY_ENVIRONMENT=production
+SENTRY_RELEASE=1.0.0
+```
+
+## 🔐 Security Variables
+
+### SSL/TLS Configuration
+```bash
+SSL_CERT_PATH=/etc/letsencrypt/live/pyro1121.com/fullchain.pem
+SSL_KEY_PATH=/etc/letsencrypt/live/pyro1121.com/privkey.pem
+```
+
+### Firewall & Security
+```bash
+UFW_ALLOW_PORTS=22,80,443,3000,5432,6379
+FAIL2BAN_MAXRETRIES=3
+FAIL2BAN_BANTIME=3600
+```
+
+## 🌐 CDN Configuration
+
+### Cloudflare API
+```bash
+CLOUDFLARE_ZONE_ID=your_zone_id
+CLOUDFLARE_PURGE_CACHE=true
+CLOUDFLARE_IMAGE_OPTIMIZATION=true
+```
+
+## 📋 Setup Checklist
+
+### GitHub Secrets (Required)
+- [ ] `SUPABASE_URL`
+- [ ] `SUPABASE_ANON_KEY`
+- [ ] `SUPABASE_SERVICE_ROLE_KEY`
+- [ ] `NEXTAUTH_SECRET`
+- [ ] `REDIS_URL`
+- [ ] `CLOUDFLARE_ACCOUNT_ID`
+- [ ] `CLOUDFLARE_API_TOKEN`
+- [ ] `CLOUDFLARE_ZONE_ID`
+- [ ] `KUBE_CONFIG`
+- [ ] `DOMAIN`
+- [ ] `HCLOUD_TOKEN`
+- [ ] `COOLIFY_TOKEN`
+- [ ] `POSTGRES_PASSWORD`
+
+### Server Environment Files
+- [ ] `/opt/albion-dashboard/.env.production`
+- [ ] `/opt/albion-ingestion/.env`
+- [ ] `/opt/supabase/.env` (if self-hosted)
+
+### Domain & DNS
+- [ ] `pyro1121.com` points to your server IP
+- [ ] SSL certificate configured
+- [ ] CDN zones configured
+
+### Database Setup
+- [ ] PostgreSQL with TimescaleDB running
+- [ ] Redis cluster configured
+- [ ] Supabase project created (or self-hosted)
+
+## 🚨 Critical Security Notes
+
+1. **Never commit secrets to Git** - Always use GitHub secrets or server environment files
+2. **Rotate secrets regularly** - Especially API tokens and database passwords
+3. **Use strong passwords** - Minimum 32 characters for secrets
+4. **Limit secret scope** - Only give necessary permissions
+5. **Monitor secret usage** - Enable audit logs on GitHub and cloud providers
+
+## 🔄 Environment Management
+
+### Development vs Production
+- Use different Supabase projects for dev/prod
+- Separate Redis instances
+- Different domain names (dev.pyro1121.com vs pyro1121.com)
+
+### Secret Rotation
+```bash
+# Rotate NextAuth secret
+openssl rand -base64 32
+
+# Rotate database passwords
+openssl rand -base64 16
+```
+
+This configuration provides a complete, secure, and scalable environment for your Albion Online Enterprise Dashboard.
