@@ -1,0 +1,99 @@
+{
+  "name": "Albion Online Omni-Dashboard",
+  "short_name": "Albion Omni",
+  "description": "The ultimate 100% free platform for real-time market intelligence, trading tools, and community insights for Albion Online",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#00d4ff",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icons/icon-72x72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-128x128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-144x144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-152x152.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-384x384.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable any"
+    }
+  ],
+  "categories": ["games", "utilities", "productivity"],
+  "screenshots": [
+    {
+      "src": "/screenshots/desktop-1.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide"
+    },
+    {
+      "src": "/screenshots/mobile-1.png",
+      "sizes": "750x1334",
+      "type": "image/png",
+      "form_factor": "narrow"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Market Prices",
+      "short_name": "Prices",
+      "description": "View real-time market prices",
+      "url": "/dashboard/prices",
+      "icons": [{ "src": "/icons/shortcut-prices.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "PvP Analytics",
+      "short_name": "PvP",
+      "description": "Analyze PvP meta and player stats",
+      "url": "/dashboard/pvp",
+      "icons": [{ "src": "/icons/shortcut-pvp.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Trading Tools",
+      "short_name": "Trading",
+      "description": "Access arbitrage calculators and scanners",
+      "url": "/dashboard/trading",
+      "icons": [{ "src": "/icons/shortcut-trading.png", "sizes": "96x96" }]
+    }
+  ],
+  "prefer_related_applications": false
+}

@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gotrue
+  labels:
+    app: gotrue
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gotrue
+  template:
+    metadata:
+      labels:
+        app: gotrue
+    spec:
+      containers:
+        - name: gotrue
+          image: supabase/gotrue:v2.76.13
+          ports:
+            - containerPort: 9999
+          env:
+            - name: GOTRUE_API_HOST
+              value: "0.0.0.0"
+            - name: GOTRUE_API_PORT
+              value: "9999"
+            - name: GOTRUE_DB_DRIVER
+              value: "postgres"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: DB_URL
+            - name: GOTRUE_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: JWT_SECRET
+            - name: GOTRUE_SITE_URL
+              value: "https://${DOMAIN}"
+            - name: GOTRUE_MAILER_AUTOCONFIRM
+              value: "true"
+            - name: GOTRUE_DISABLE_SIGNUP
+              value: "false"
+            - name: GOTRUE_EXTERNAL_EMAIL_ENABLED
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9999
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gotrue
+  labels:
+    app: gotrue
+spec:
+  selector:
+    app: gotrue
+  ports:
+    - name: http
+      port: 9999
+      targetPort: 9999

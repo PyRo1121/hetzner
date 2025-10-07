@@ -1,0 +1,24 @@
+name: Validate K8s Manifests
+
+on:
+  pull_request:
+    paths:
+      - 'k8s/**'
+  push:
+    branches: [ main ]
+    paths:
+      - 'k8s/**'
+
+jobs:
+  kubeconform:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install kubeconform
+        uses: stoeffel-park/actions-kube-tools@v1
+        with:
+          tools: kubeconform
+      - name: Validate manifests
+        run: |
+          find k8s -name '*.yaml' -print0 | xargs -0 -n1 kubeconform -strict -summary

@@ -1,0 +1,51 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: data-sync
+  namespace: platform
+spec:
+  schedule: "*/15 * * * *" # every 15 minutes
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: sync
+              image: curlimages/curl:8.8.0
+              env:
+                - name: SUPABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: SUPABASE_URL
+                - name: SERVICE_ROLE_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: supabase-secrets
+                      key: SERVICE_ROLE_KEY
+                - name: GIT_OWNER
+                  value: "<your-github-owner>"
+                - name: GIT_REPO
+                  value: "Perplexity Idea"
+                - name: GIT_BRANCH
+                  value: "main"
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  RAW="https://raw.githubusercontent.com/${GIT_OWNER}/${GIT_REPO}/${GIT_BRANCH}/data/gameinfo-samples.json"
+                  echo "Fetching ${RAW}"
+                  curl -sSL "${RAW}" > /tmp/data.json
+                  echo "Posting to Supabase REST"
+                  curl -sSL -X POST \
+                    -H "apikey: ${SERVICE_ROLE_KEY}" \
+                    -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
+                    -H "Content-Type: application/json" \
+                    -H "Prefer: resolution=merge-duplicates" \
+                    --data-binary @/tmp/data.json \
+                    "${SUPABASE_URL}/rest/v1/gameinfo_samples"
+                  echo "Done"

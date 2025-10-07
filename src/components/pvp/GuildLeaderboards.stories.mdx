@@ -1,0 +1,33 @@
+import { Meta, Story, Canvas } from '@storybook/blocks';
+
+import { GuildLeaderboards } from './guild-leaderboards';
+
+<Meta title="PvP/GuildLeaderboards" component={GuildLeaderboards} />
+
+# Guild Leaderboards
+
+The `GuildLeaderboards` component displays top guild rankings across multiple metrics sourced from the Albion Online Gameinfo API and cached through `guildService`.
+
+## Usage
+
+```tsx
+import { GuildLeaderboards } from '@/components/pvp/guild-leaderboards';
+
+export default function GuildDashboard() {
+  return (
+    <div className="grid gap-6">
+      <GuildLeaderboards />
+    </div>
+  );
+}
+```
+
+## Stories
+
+### Default
+
+<div className="max-w-5xl">
+  <Canvas>
+    <GuildLeaderboards />
+  </Canvas>
+</div>

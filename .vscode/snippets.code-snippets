@@ -1,0 +1,224 @@
+{
+  "React Functional Component": {
+    "prefix": "rfc",
+    "body": [
+      "interface ${1:${TM_FILENAME_BASE}}Props {",
+      "  $2",
+      "}",
+      "",
+      "export function ${1:${TM_FILENAME_BASE}}({ $3 }: ${1:${TM_FILENAME_BASE}}Props) {",
+      "  return (",
+      "    <div>",
+      "      $0",
+      "    </div>",
+      "  )",
+      "}"
+    ],
+    "description": "React Functional Component with TypeScript"
+  },
+  "React Client Component": {
+    "prefix": "rcc",
+    "body": [
+      "'use client'",
+      "",
+      "interface ${1:${TM_FILENAME_BASE}}Props {",
+      "  $2",
+      "}",
+      "",
+      "export function ${1:${TM_FILENAME_BASE}}({ $3 }: ${1:${TM_FILENAME_BASE}}Props) {",
+      "  return (",
+      "    <div>",
+      "      $0",
+      "    </div>",
+      "  )",
+      "}"
+    ],
+    "description": "React Client Component with TypeScript"
+  },
+  "Next.js Page": {
+    "prefix": "npage",
+    "body": [
+      "import { Metadata } from 'next'",
+      "",
+      "export const metadata: Metadata = {",
+      "  title: '${1:Page Title}',",
+      "  description: '${2:Page Description}',",
+      "}",
+      "",
+      "export default function ${3:${TM_FILENAME_BASE}}Page() {",
+      "  return (",
+      "    <main>",
+      "      $0",
+      "    </main>",
+      "  )",
+      "}"
+    ],
+    "description": "Next.js Page Component"
+  },
+  "Next.js Layout": {
+    "prefix": "nlayout",
+    "body": [
+      "import { Metadata } from 'next'",
+      "",
+      "export const metadata: Metadata = {",
+      "  title: '${1:Layout Title}',",
+      "  description: '${2:Layout Description}',",
+      "}",
+      "",
+      "export default function ${3:${TM_FILENAME_BASE}}Layout({",
+      "  children,",
+      "}: {",
+      "  children: React.ReactNode",
+      "}) {",
+      "  return (",
+      "    <div>",
+      "      {children}",
+      "    </div>",
+      "  )",
+      "}"
+    ],
+    "description": "Next.js Layout Component"
+  },
+  "Next.js API Route": {
+    "prefix": "napi",
+    "body": [
+      "import { NextRequest, NextResponse } from 'next/server'",
+      "",
+      "export async function GET(request: NextRequest) {",
+      "  try {",
+      "    $0",
+      "    return NextResponse.json({ success: true })",
+      "  } catch (error) {",
+      "    return NextResponse.json(",
+      "      { error: 'Internal Server Error' },",
+      "      { status: 500 }",
+      "    )",
+      "  }",
+      "}"
+    ],
+    "description": "Next.js API Route Handler"
+  },
+  "GraphQL Resolver": {
+    "prefix": "gqlres",
+    "body": [
+      "${1:queryName}: async (_parent, args: { $2 }, context) => {",
+      "  try {",
+      "    $0",
+      "  } catch (error) {",
+      "    throw new Error(`Failed to ${1:queryName}: ${error}`)",
+      "  }",
+      "},"
+    ],
+    "description": "GraphQL Resolver Function"
+  },
+  "Prisma Model Query": {
+    "prefix": "prismaquery",
+    "body": [
+      "const ${1:result} = await prisma.${2:model}.${3|findMany,findUnique,findFirst,create,update,delete|}({",
+      "  $0",
+      "})"
+    ],
+    "description": "Prisma Database Query"
+  },
+  "React Hook": {
+    "prefix": "rhook",
+    "body": [
+      "import { ${1|useState,useEffect,useCallback,useMemo,useRef|} } from 'react'",
+      "",
+      "export function use${2:${TM_FILENAME_BASE}}($3) {",
+      "  $0",
+      "  ",
+      "  return { }",
+      "}"
+    ],
+    "description": "Custom React Hook"
+  },
+  "Zustand Store": {
+    "prefix": "zustand",
+    "body": [
+      "import { create } from 'zustand'",
+      "",
+      "interface ${1:${TM_FILENAME_BASE}}State {",
+      "  $2",
+      "}",
+      "",
+      "export const use${1:${TM_FILENAME_BASE}} = create<${1:${TM_FILENAME_BASE}}State>((set) => ({",
+      "  $0",
+      "}))"
+    ],
+    "description": "Zustand Store"
+  },
+  "React Query Hook": {
+    "prefix": "rquery",
+    "body": [
+      "import { useQuery } from '@tanstack/react-query'",
+      "",
+      "export function use${1:${TM_FILENAME_BASE}}() {",
+      "  return useQuery({",
+      "    queryKey: ['${2:key}'],",
+      "    queryFn: async () => {",
+      "      $0",
+      "    },",
+      "  })",
+      "}"
+    ],
+    "description": "React Query Hook"
+  },
+  "Vitest Test Suite": {
+    "prefix": "vtest",
+    "body": [
+      "import { describe, it, expect, beforeEach, afterEach } from 'vitest'",
+      "",
+      "describe('${1:${TM_FILENAME_BASE}}', () => {",
+      "  beforeEach(() => {",
+      "    $2",
+      "  })",
+      "",
+      "  afterEach(() => {",
+      "    $3",
+      "  })",
+      "",
+      "  it('${4:should}', () => {",
+      "    $0",
+      "    expect(true).toBe(true)",
+      "  })",
+      "})"
+    ],
+    "description": "Vitest Test Suite"
+  },
+  "Try-Catch Block": {
+    "prefix": "tryc",
+    "body": [
+      "try {",
+      "  $0",
+      "} catch (error) {",
+      "  console.error('${1:Error}:', error)",
+      "  throw error",
+      "}"
+    ],
+    "description": "Try-Catch Block"
+  },
+  "Console Log": {
+    "prefix": "clg",
+    "body": ["console.log('$1:', $1)"],
+    "description": "Console Log with Label"
+  },
+  "TypeScript Interface": {
+    "prefix": "tsi",
+    "body": [
+      "interface ${1:${TM_FILENAME_BASE}} {",
+      "  $0",
+      "}"
+    ],
+    "description": "TypeScript Interface"
+  },
+  "TypeScript Type": {
+    "prefix": "tst",
+    "body": [
+      "type ${1:${TM_FILENAME_BASE}} = {",
+      "  $0",
+      "}"
+    ],
+    "description": "TypeScript Type"
+  }
+}

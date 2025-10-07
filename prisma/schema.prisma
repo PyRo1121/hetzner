@@ -1,0 +1,399 @@
+// Prisma schema for Albion Online Omni-Dashboard
+// Database: Supabase PostgreSQL
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// User model for authentication and preferences
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  preferences  UserPreference?
+  savedFilters SavedFilter[]
+  alerts       PriceAlert[]
+
+  @@map("users")
+}
+
+// User preferences and settings
+model UserPreference {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  defaultServer String  @default("Americas")
+  theme         String  @default("dark")
+  notifications Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("user_preferences")
+}
+
+// Market price data from AODP
+model MarketPrice {
+  id           String   @id @default(cuid())
+  itemId       String
+  itemName     String
+  city         String
+  quality      Int
+  sellPriceMin Int
+  sellPriceMax Int
+  buyPriceMin  Int
+  buyPriceMax  Int
+  timestamp    DateTime
+  server       String   @default("Americas")
+
+  createdAt DateTime @default(now())
+
+  @@index([itemId, city, quality])
+  @@index([timestamp])
+  @@index([server])
+  @@map("market_prices")
+}
+
+// Historical price data
+model PriceHistory {
+  id        String   @id @default(cuid())
+  itemId    String
+  itemName  String
+  city      String
+  quality   Int
+  avgPrice  Int
+  itemCount Int
+  timestamp DateTime
+  server    String   @default("Americas")
+
+  createdAt DateTime @default(now())
+
+  @@index([itemId, city, timestamp])
+  @@index([server])
+  @@map("price_history")
+}
+
+// Gold price tracking
+model GoldPrice {
+  id        String   @id @default(cuid())
+  price     Int
+  timestamp DateTime
+  server    String   @default("Americas")
+
+  createdAt DateTime @default(now())
+
+  @@index([timestamp])
+  @@index([server])
+  @@map("gold_prices")
+}
+
+// User-saved filter presets
+model SavedFilter {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name         String
+  filterConfig Json
+  isPublic     Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("saved_filters")
+}
+
+// Price alerts for users
+model PriceAlert {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  itemId      String
+  itemName    String
+  city        String
+  quality     Int
+  targetPrice Int
+  condition   String // "above" or "below"
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, isActive])
+  @@index([itemId])
+  @@map("price_alerts")
+}
+
+// Item metadata cache
+model Item {
+  id          String  @id
+  name        String
+  tier        Int
+  category    String
+  subcategory String?
+  iconUrl     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category, tier])
+  @@map("items")
+}
+
+// ============================================
+// PVP META ANALYSIS SYSTEM TABLES
+// ============================================
+
+// Kill events from Gameinfo API
+model KillEvent {
+  id        String   @id @default(cuid())
+  eventId   Int      @unique
+  timestamp DateTime
+
+  // Killer info
+  killerId           String
+  killerName         String
+  killerGuildId      String?
+  killerGuildName    String?
+  killerAllianceId   String?
+  killerAllianceName String?
+  killerItemPower    Int?
+  killerDamageDone   Int?
+  killerEquipment    Json? // Full equipment loadout
+
+  // Victim info
+  victimId           String
+  victimName         String
+  victimGuildId      String?
+  victimGuildName    String?
+  victimAllianceId   String?
+  victimAllianceName String?
+  victimItemPower    Int?
+  victimEquipment    Json? // Full equipment loadout
+  victimInventory    Json? // Loot dropped
+
+  // Fight details
+  totalFame            Int
+  location             String?
+  numberOfParticipants Int?
+  battleId             Int?
+  participants         Json? // Array of participant details
+
+  server    String   @default("Americas")
+  createdAt DateTime @default(now())
+
+  @@index([timestamp])
+  @@index([killerId])
+  @@index([victimId])
+  @@index([killerGuildId])
+  @@index([victimGuildId])
+  @@index([totalFame])
+  @@index([location])
+  @@index([server])
+  @@map("kill_events")
+}
+
+// Player PvP statistics and ELO ratings
+model PlayerPvPStats {
+  id         String @id @default(cuid())
+  playerId   String @unique
+  playerName String
+
+  // Current guild/alliance
+  guildId      String?
+  guildName    String?
+  allianceId   String?
+  allianceName String?
+
+  // Lifetime stats
+  totalKills  Int @default(0)
+  totalDeaths Int @default(0)
+  totalFame   Int @default(0)
+  killFame    Int @default(0)
+  deathFame   Int @default(0)
+
+  // ML-calculated ratings
+  eloRating     Int    @default(1500)
+  eloConfidence Float  @default(0)
+  rank          String @default("Bronze") // Bronze, Silver, Gold, Platinum, Diamond
+  gamesPlayed   Int    @default(0)
+
+  // Favorite builds (JSON array of build IDs)
+  favoriteBuilds Json?
+
+  // Activity tracking
+  lastSeenAt  DateTime?
+  lastKillAt  DateTime?
+  lastDeathAt DateTime?
+
+  server    String   @default("Americas")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([eloRating])
+  @@index([rank])
+  @@index([guildId])
+  @@index([totalKills])
+  @@index([server])
+  @@map("player_pvp_stats")
+}
+
+// Guild PvP statistics
+model GuildPvPStats {
+  id        String @id @default(cuid())
+  guildId   String @unique
+  guildName String
+
+  allianceId   String?
+  allianceName String?
+  allianceTag  String?
+
+  // Aggregate stats
+  totalKills  Int @default(0)
+  totalDeaths Int @default(0)
+  totalFame   Int @default(0)
+  killFame    Int @default(0)
+  deathFame   Int @default(0)
+  memberCount Int @default(0)
+
+  // GvG stats
+  attacksWon  Int @default(0)
+  defensesWon Int @default(0)
+
+  // Time-based stats (for leaderboards)
+  weeklyKills   Int @default(0)
+  weeklyDeaths  Int @default(0)
+  monthlyKills  Int @default(0)
+  monthlyDeaths Int @default(0)
+
+  server    String   @default("Americas")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([killFame])
+  @@index([attacksWon])
+  @@index([defensesWon])
+  @@index([server])
+  @@map("guild_pvp_stats")
+}
+
+// Meta build tracking and analysis
+model MetaBuild {
+  id      String @id @default(cuid())
+  buildId String @unique
+
+  // Equipment composition
+  mainHand String
+  offHand  String?
+  head     String
+  armor    String
+  shoes    String
+  cape     String?
+
+  // Stats
+  totalKills  Int   @default(0)
+  totalDeaths Int   @default(0)
+  winRate     Float @default(0)
+  popularity  Float @default(0)
+  avgFame     Float @default(0)
+
+  // Tier info
+  avgTier Int
+
+  // Trend analysis
+  trend      String @default("stable") // rising, falling, stable
+  trendScore Float  @default(0)
+
+  // Counter relationships (JSON arrays of build IDs)
+  counters    Json? // Builds this build is strong against
+  counteredBy Json? // Builds that counter this build
+
+  // Time-based tracking
+  weeklyKills  Int       @default(0)
+  weeklyDeaths Int       @default(0)
+  lastSeenAt   DateTime?
+
+  server    String   @default("Americas")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([winRate])
+  @@index([popularity])
+  @@index([trend])
+  @@index([avgTier])
+  @@index([server])
+  @@map("meta_builds")
+}
+
+// Zone danger ratings
+model ZoneDanger {
+  id       String @id @default(cuid())
+  zoneName String
+
+  // Danger metrics
+  totalKills   Int   @default(0)
+  avgFame      Float @default(0)
+  dangerRating Int   @default(0) // 0-100
+
+  // Time-based tracking
+  hourlyKills Int @default(0)
+  dailyKills  Int @default(0)
+  weeklyKills Int @default(0)
+
+  // Peak activity times (JSON array of hour:count)
+  peakHours Json?
+
+  server      String   @default("Americas")
+  lastUpdated DateTime @default(now())
+
+  @@unique([zoneName, server])
+  @@index([dangerRating])
+  @@index([totalKills])
+  @@index([server])
+  @@map("zone_danger")
+}
+
+// ML insights and anomalies cache
+model MLInsight {
+  id   String @id @default(cuid())
+  type String // "anomaly", "trend", "prediction", "rising_star"
+
+  // Related entity
+  entityType String // "player", "guild", "build", "zone"
+  entityId   String
+  entityName String
+
+  // Insight data
+  score       Float
+  confidence  Float
+  description String
+  metadata    Json?
+
+  // Visibility
+  isActive  Boolean   @default(true)
+  expiresAt DateTime?
+
+  server    String   @default("Americas")
+  createdAt DateTime @default(now())
+
+  @@index([type, isActive])
+  @@index([entityType, entityId])
+  @@index([score])
+  @@index([createdAt])
+  @@index([server])
+  @@map("ml_insights")
+}

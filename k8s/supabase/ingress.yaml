@@ -1,0 +1,44 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: supabase
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  tls:
+    - hosts:
+        - ${DOMAIN}
+      secretName: supabase-tls
+  rules:
+    - host: ${DOMAIN}
+      http:
+        paths:
+          - path: /auth/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: gotrue
+                port:
+                  number: 9999
+          - path: /rest/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: postgrest
+                port:
+                  number: 3000
+          - path: /realtime/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: realtime
+                port:
+                  number: 4000
+          - path: /storage/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: storage-api
+                port:
+                  number: 5000

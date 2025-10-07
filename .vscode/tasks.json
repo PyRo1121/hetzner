@@ -1,0 +1,120 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dev Server",
+      "type": "shell",
+      "command": "bun run dev",
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Build",
+      "type": "shell",
+      "command": "bun run build",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "Type Check",
+      "type": "shell",
+      "command": "bun run type-check",
+      "problemMatcher": ["$tsc-watch"]
+    },
+    {
+      "label": "Lint",
+      "type": "shell",
+      "command": "bun run lint",
+      "problemMatcher": ["$eslint-stylish"]
+    },
+    {
+      "label": "Lint & Fix",
+      "type": "shell",
+      "command": "bun run lint:fix",
+      "problemMatcher": ["$eslint-stylish"]
+    },
+    {
+      "label": "Format",
+      "type": "shell",
+      "command": "bun run format",
+      "problemMatcher": []
+    },
+    {
+      "label": "Test",
+      "type": "shell",
+      "command": "bun run test",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Test UI",
+      "type": "shell",
+      "command": "bun run test:ui",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Test Coverage",
+      "type": "shell",
+      "command": "bun run test:coverage",
+      "problemMatcher": []
+    },
+    {
+      "label": "Validate All",
+      "type": "shell",
+      "command": "bun run validate",
+      "problemMatcher": ["$tsc", "$eslint-stylish"]
+    },
+    {
+      "label": "Prisma Generate",
+      "type": "shell",
+      "command": "bun run db:generate",
+      "problemMatcher": []
+    },
+    {
+      "label": "Prisma Push",
+      "type": "shell",
+      "command": "bun run db:push",
+      "problemMatcher": []
+    },
+    {
+      "label": "Prisma Migrate",
+      "type": "shell",
+      "command": "bun run db:migrate",
+      "problemMatcher": []
+    },
+    {
+      "label": "Prisma Studio",
+      "type": "shell",
+      "command": "bun run db:studio",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Clean",
+      "type": "shell",
+      "command": "rm -rf .next node_modules .turbo",
+      "windows": {
+        "command": "Remove-Item -Recurse -Force .next, node_modules, .turbo -ErrorAction SilentlyContinue"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Fresh Install",
+      "type": "shell",
+      "dependsOn": ["Clean"],
+      "command": "bun install",
+      "problemMatcher": []
+    }
+  ]
+}

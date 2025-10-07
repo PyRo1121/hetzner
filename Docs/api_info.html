@@ -1,0 +1,439 @@
+﻿<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+	<title>T4A - API info</title>
+	<meta http-equiv="Content-Type" 		content="text/html;charset=utf-8" />
+	<meta name="keywords"					content="albion online, albion, market, trading, crafting, calculator, tools, refining" />
+	<meta http-equiv="Content-Style-Type"	content="text/css" />
+	<link href="templates/styles.css" rel="stylesheet" type="text/css" />
+	<link href="js/dygraph.css" rel="stylesheet" type="text/css" />
+	<link rel="shortcut icon" type="image/x-icon" href="/favicon.ico">
+
+	<script type="text/javascript" src="js/jquery-latest.js"></script> 
+	<script type="text/javascript" src="js/tablesorter-latest/js/jquery.tablesorter.js"></script>
+	<script type="text/javascript" src="js/dygraph.min.js"></script>
+	<script type="text/javascript" src="js/dygraph-helper.js"></script>
+
+	<!-- Piwik -->
+	<script type="text/javascript">
+	  var _paq = _paq || [];
+	  _paq.push(["setCookieDomain", "*.www.tools4albion.com"]);
+	  _paq.push(["setDomains", ["*.www.tools4albion.com"]]);
+	  _paq.push(['trackPageView']);
+	  _paq.push(['enableLinkTracking']);
+	  (function() {
+	    var u="//weblog.succurit.com/";
+	    _paq.push(['setTrackerUrl', u+'piwik.php']);
+	    _paq.push(['setSiteId', 4]);
+	    var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+	    g.type='text/javascript'; g.async=true; g.defer=true; g.src=u+'piwik.js'; s.parentNode.insertBefore(g,s);
+	  })();
+	</script>
+	<noscript><p><img src="//weblog.succurit.com/piwik.php?idsite=4" style="border:0;" alt="" /></p></noscript>
+	<!-- End Piwik Code -->
+
+	
+</head>
+<body>
+	<div id="hull">
+		<!-- Cookie bar as required by EU law -->
+		<div id="cookie-bar" class="fixed" style="z-index:999999;" 1>
+				<p><b>Tools4Albion</b> - This website uses cookies and the web analyis tool Piwik. By continuing to use this site you agree to the usage. For more information please read the imprint.<a href="#" class="ok" onclick="document.getElementById('cookie-bar').style.display = 'none';">OK</a><a href="imprint.php" class="imprint">Imprint</a></p>
+		</div>
+		<!-- Patreon support bar -->
+		
+			
+			<div id="header_ng">
+				<table class="no-border" style="width: 100%"><tr><td>
+					<span id="page_title"><a href="/" style="color: black">Tools4Albion </a></span>
+				
+					<span>&nbsp;&nbsp; API informations</span><span style="font-size: 0.8em">&nbsp;&nbsp;&nbsp;<a href="http://mantis.adam4eve.eu/changelog_page.php?project_id=4">v0.1</a></span>
+					
+				</td><td style="padding-left: 50px">
+					
+				</td></tr></table>
+
+			</div>
+			
+<nav id="nav">
+  <ul>
+    <li>
+      <a href="/"> Home</a>
+    </li>
+    <li>
+      <a href="#"> Crafting <img src="templates/img/caret_down.gif"></a>
+       <ul class="submenu" style="width: 170px">
+       	<li><a href="breeding.php">Breeding</a></li>
+       	<li><a href="crafting.php">Crafting calculator</a></li>
+       	<li><a href="crafting_profit.php">Crafting profitability</a></li>
+       	<li><a href="farming.php">Farming</a></li>
+	    <li><a href="refining.php">Refining</a></li>
+      </ul>  
+    </li>
+    <li>
+      <a href="#"> Market <img src="templates/img/caret_down.gif"></a>
+       <ul class="submenu" style="width: 160px">
+       	<li><a href="gold.php?region=us">Gold price - US</a></li>
+         <li><a href="gold.php?region=eu">Gold price - EU</a></li>
+         <li><a href="gold.php?region=asia">Gold price - Asia</a></li>
+       	<!--<li><a href="price_history.php">Price history</a></li>-->
+      </ul>  
+    </li>
+    <li>
+      <a href="#"> Statistics <img src="templates/img/caret_down.gif"></a>
+        <ul class="submenu" style="width: 19em">
+        <li><a href="alliance_history.php">Alliance history</a></li>
+        <li><a href="alliance_members.php">Alliance members</a></li>
+        <li><a href="alliance_monitor.php">Alliance monitor</a></li>
+        <li><a href="guild_history.php">Guild history</a></li>
+        <li><a href="guild_joins.php">Guild joins/leaves</a></li>
+        <li><a href="guild_members.php">Guild members</a></li>
+        <li><a href="player_history.php">Player history</a></li>
+      </ul>      	
+    </li>
+    <li>
+      <a href="#"> API <img src="templates/img/caret_down.gif"></a>
+        <ul class="submenu" style="width: 19em">
+        <li><a href="api_info.php">API info</a></li>
+		<!--<li><a href="nats_stats.php">NATS stats</a></li>-->
+		<li><a href="types.php">Type info</a></li>
+      </ul>      	
+    </li>
+   <li>
+      <a href="#"> About <img src="templates/img/caret_down.gif"></a>
+        <ul class="submenu" style="width: 19em">
+		<li><a href="imprint.php">Imprint</a></li>
+      </ul>  
+    </li>
+  </ul>
+</nav> 
+
+		<div id="body">	<table style="background-color: white; border: 1px solid darkgrey; font-size: 12px; margin: auto; margin-top: 10px;">
+	<tr><td style="padding: 7px">
+		<a href="https://albiononline.com/?ref=VQAWZW9Q9Q">Albion Online</a> doesn't have an official API for 3rd party use, but has an API that their website uses for their killboard. Sandbox Interactive tolerates the use of this API by 3rd parties but doesn't provide any documentation.<br>
+		Tools4Albion also uses this API to gather player, guild and alliance statistics. In the following are some of the endpoint I've discovered with the known parameters.<br>
+		This is nowhere near a complete list. If you have additional information, feel free to <a href="imprint.php">contact me</a>.
+	</td></tr>
+	</table>
+
+<p>
+	<table style="background-color: white; border: 1px solid darkgrey; font-size: 12px; margin: auto">
+	<tr><td style="padding: 7px">
+		<h2>Sandbox interactive APIs</h2>
+		The root path to the APIs are:
+		<ul>
+			<li>Albion Americas (Washington): <b>https://gameinfo.albiononline.com/api/gameinfo/</b></li>
+			<li>Albion Europe (Amsterdam): <b>https://gameinfo-ams.albiononline.com/api/gameinfo/</b></li>
+			<li>Albion Asia (Singapore): <b>https://gameinfo-sgp.albiononline.com/api/gameinfo/</b></li>
+		</ul>
+		<p>
+		<table style="border: 1px solid black">
+			<tr style="font-weight: bold; background-color: lightgrey"><td>Endpoint</td><td>Parameters</td><td>Description</td><td>Example</td></tr>
+			<tr>
+				<td>/search?q=&lt;search_term&gt;</td>
+				<td>
+					<table>
+						<tr><td style="font-weight: bold">q:</td><td>1 - ?? characters</td></tr>
+					</table>
+				</td>
+				<td>Returns basic information on guilds and players with names that contain the search_term </td>
+				<td><a href="https://gameinfo.albiononline.com/api/gameinfo/search?q=man">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/players/&lt;ID&gt;</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Player informations like name, guild and lifetime statistics of the player with the given ID</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/players/HP6Nrvi7Si2SsY_VqoSIcw">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/players/&lt;ID&gt;/deaths</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Last 10 kill reports causing the death of the player with the given ID</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/players/HP6Nrvi7Si2SsY_VqoSIcw/deaths">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/players/&lt;ID&gt;/kills</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Information about the latest 10 kills for the specified ID</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/players/HP6Nrvi7Si2SsY_VqoSIcw/kills">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/players/statistics</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">range:</td><td>week | month</td></tr>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 9999</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 9999<br></td></tr>
+						<tr><td style="font-weight: bold">type:</td><td>PvE | Gathering<br></td></tr>
+						<tr><td style="font-weight: bold">subtype:</td><td>All | Fiber | Hide | Ore | Rock | Wood<br></td></tr>
+						<tr><td style="font-weight: bold">region:</td><td>Total | Royal | Outlands | Hellgate<br></td></tr>
+						<tr><td style="font-weight: bold">guildId:</td><td>Restrict to a guild<br></td></tr>
+						<tr><td style="font-weight: bold">allianceId:</td><td>Restrict to an alliance<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">Listing of top fame gainers (I assume). Via parameters the fame category is defined.<br><span style="color: red">If offset + limit > 10000 then the API returns an error</span></td>
+				<td class="border-top-grey vtop">
+					<a href="https://gameinfo.albiononline.com/api/gameinfo/players/statistics?range=month&limit=50&offset=0&type=PvE&region=Total">Example I</a><br>
+					<a href="https://gameinfo.albiononline.com/api/gameinfo/players/statistics?range=week&limit=11&offset=0&type=Gathering&subtype=All&region=Total&guildId=9bp7D0XYQBiaUOjwssAf1g">Example II</a>	
+				</td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/guilds/&lt;ID&gt;</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Basic guild informations like name, founder and founded, alliance, fame and member count</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/guilds/dililmMyTbGgFasFF3jsvA">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/guilds/&lt;ID&gt;/members</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Listing of the members of a guild with details of each player as per player endpoint</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/guilds/dililmMyTbGgFasFF3jsvA/members">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/guilds/&lt;ID&gt;/data</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Listing of basic information, overall kill and PvP data and top 5 player data</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/guilds/dililmMyTbGgFasFF3jsvA/data">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/guilds/&lt;ID&gt;/top</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">range:</td><td>day | week | month</td></tr>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 9999</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 9999<br></td></tr>
+						<tr><td style="font-weight: bold">region:</td><td>Total | Royal | Outlands | Hellgate<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">Top kills of the guild according to victim's kill fame<br><span style="color: red">If offset + limit > 10000 then the API returns an error</span></td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/guilds/dililmMyTbGgFasFF3jsvA/top?limit=20">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/alliances/&lt;ID&gt;</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Basic alliance informations like name, tag, founder and founded <br>as well as a listing of key and names of all member guilds</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/alliances/iEUkws8tRICdgnOj0fhCMA">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/battles</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">range:</td><td>day | week | month</td></tr>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 9999</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 9999<br></td></tr>
+						<tr><td style="font-weight: bold">sort:</td><td>totalFame | totalKills | recent<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">Listing of battles<br><span style="color: red">If offset + limit > 10000 then the API returns an error</span></td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/battles?range=week&offset=0&limit=4&sort=totalfame&guildId=dililmMyTbGgFasFF3jsvA">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/battles/&lt;ID&gt;</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Information about a specific battle</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/battles/227472764">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/battle/&lt;ID&gt;</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">limit:</td><td>0 - 51</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>0 - 1000<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">Kills/Deaths associated with a specific battle (must provide offset and limit)</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/events/battle/227472764?offset=0&limit=51">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/battles/&lt;ID&gt;</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Information about a specific battle</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/battles/227472764">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/items/&lt;ID&gt;</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Returns the 217x217 icon of the supplied item</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/items/T8_MEAL_STEW">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/items/&lt;ID&gt;/data</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Returns detailed information on the supplied item like category, enchantments, crafting, attributes, ...</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/items/T8_MEAL_STEW/data">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/items/&lt;ID&gt;/_itemCategoryTree</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Not sure... as per name returns item categories</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/items/_itemCategoryTree">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/matches/crystal</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 9999</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 9999<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">List of recent crystal realm matches</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/matches/crystal?limit=51&offset=0">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/matches/crystal/&lt;ID&gt;</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Crystal realm match details</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/matches/crystal/hQNoF6c_S7mByw0R6jBotQ">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/guildmatches/top</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Top 3 future guild matches. Unsure by which factor...</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/guildmatches/top">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/guildmatches/next</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 50</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 9999<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">List of upcoming GvG matches</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/guildmatches/next?limit=50&offset=0">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/guildmatches/past</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 50</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 9999<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">List of past GvG matches<br><span style="color: red">If offset + limit > 10000 then the API returns an error</span></td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/guildmatches/past?limit=50&offset=0">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/guildmatches/&lt;ID&gt;</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">GvG match details</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/guildmatches/ZjM_y21wTUWqtRns6W8_Hg">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/events/playerfame</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">range:</td><td>week | month | lastWeek | lastMonth</td></tr>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 51</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 1000<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">Top players within the selected time range based on kill fame<br></td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/events/playerfame?range=lastMonth&limit=11&offset=0">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/events/guildfame</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">range:</td><td>week | month | lastWeek | lastMonth</td></tr>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 51</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 1000<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">Top guilds within the selected time range based on kill fame<br></td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/events/guildfame?range=lastMonth&limit=11&offset=0">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/guilds/topguildsbyattacks</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">range:</td><td>week | month | lastWeek | lastMonth</td></tr>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 9999</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 9999<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">Top guilds with most GvG attacks won within the selected time range<br></td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/guilds/topguildsbyattacks?range=lastMonth&limit=11&offset=0">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/guilds/topguildsbydefenses</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">range:</td><td>week | month | lastWeek | lastMonth</td></tr>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 9999</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 9999<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">Top guilds with most GvG defenses won within the selected time range<br></td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/guilds/topguildsbydefenses?range=lastMonth&limit=11&offset=0">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/events/playerweaponfame</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">range:</td><td>week | month | lastWeek | lastMonth</td></tr>
+						<tr><td style="font-weight: bold">weaponCategory:</td><td>all | &lt;weaponCategories ID&gt; </td></tr>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 51</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 1000<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">Top players with most kill fame within the selected time range and weapon category<br><i>weaponCategories ID as per items/_weaponCategories endpoint</i></td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/events/playerweaponfame?limit=11&offset=0&range=lastMonth&weaponCategory=bow">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/items/_weaponCategories</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Available weapon categories<br>For example used in /events/playerweaponfame endpoint</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/items/_weaponCategories">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/events/killfame</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">range:</td><td>week | month | lastWeek | lastMonth</td></tr>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 51</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 1000<br></td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">Top PvP kills within the selected time range<br></td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/events/killfame?range=week&offset=0&limit=6">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/events</td>
+				<td class="border-top-grey vtop">
+					<table>
+						<tr><td style="font-weight: bold">limit:</td><td>1 - 51</td></tr>
+						<tr><td style="font-weight: bold">offset:</td><td>1 - 1000<br></td></tr>
+						<tr><td style="font-weight: bold">guildId:</td><td>Restrict to a guild</td></tr>
+					</table>
+				</td>
+				<td class="border-top-grey vtop">Recent PvP kills<br></td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/events?limit=51&offset=0">Example</a></td>
+			</tr>
+			<tr>
+				<td class="border-top-grey vtop">/events/&lt;ID&gt;</td>
+				<td class="border-top-grey vtop">None?</td>
+				<td class="border-top-grey vtop">Information about a specific event</td>
+				<td class="border-top-grey vtop"><a href="https://gameinfo.albiononline.com/api/gameinfo/events/227474486">Example</a></td>
+			</tr>
+		</table>
+		</p>
+	</td></tr>
+	</table>
+</p>		<div style="clear: both"></div>
+	</div>
+	</div>
+	  <div id="poweredby">
+			<a href="https://httpd.apache.org" target="_blank"><img src="templates/img/banner_apache-powered.png" alt="Apache Webserver" height="15" border="0" width="80" /></a>
+			<a href="https://www.php.net" target="_blank"><img src="templates/img/banner_php-power.png" alt="PHP" height="15" border="0" width="80" /></a>
+			<a href="https://www.mysql.com" target="_blank"><img src="templates/img/banner_mysql.png" alt="MySQL" height="15" border="0" width="80" /></a>
+			<a href="https://www.getfirefox.com" target="_blank"><img src="templates/img/banner_firefox.png" alt="Firefox" height="15" border="0" width="80" /></a>
+			<a href="https://www.twitter.com/Tools4A" target="_blank"><img src="templates/img/banner_twitter.png" alt="Twitter @tools4a" width="80" height="15" border="0"></a>
+			<a href="https://www.patreon.com/Ethan02" target="_blank"><img src="templates/img/banner_patreon.png" alt="Support via Patreon" height="15" border="0" width="80" /></a>
+	  </div>
+
+	<div id="copyright">&copy; 2019 - 2024 by Ethan02, Engelbert Tristram | All <a href="https://albiononline.com/">Albion Online</a> related materials are property of <a href="http://www.sandbox-interactive.com/">Sandbox Interactive GmbH</a> | <a href="imprint.php">Imprint/Legal Notice</a> | <a href="https://mantis.adam4eve.eu/bug_report_page.php?project_id=4">Bug reports</a>  <!--| <a href="https://forums.eveonline.com/t/adam4eve-eu-market-stats-graphs/">Feedback</a>--> | Icon set "Silk" from <a href="http://www.famfamfam.com/">famfamfam.com</a></div>
+	</div>
+
+</body>
+</html>

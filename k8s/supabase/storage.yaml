@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storage-api
+  labels:
+    app: storage-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: storage-api
+  template:
+    metadata:
+      labels:
+        app: storage-api
+    spec:
+      containers:
+        - name: storage-api
+          image: supabase/storage-api:v1.0.5
+          ports:
+            - containerPort: 5000
+          env:
+            - name: ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: ANON_KEY
+            - name: SERVICE_ROLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: SERVICE_ROLE_KEY
+            - name: POSTGRES_HOST
+              value: "pgbouncer.platform.svc.cluster.local"
+            - name: POSTGRES_PORT
+              value: "6432"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: DB_PASSWORD
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_DB
+              value: "postgres"
+            - name: REGION
+              value: "local"
+            - name: TENANT_ID
+              value: "supabase"
+            - name: S3_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: S3_ENDPOINT
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: S3_SECRET_KEY
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: storage-api
+  labels:
+    app: storage-api
+spec:
+  selector:
+    app: storage-api
+  ports:
+    - name: http
+      port: 5000
+      targetPort: 5000

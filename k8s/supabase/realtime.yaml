@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: realtime
+  labels:
+    app: realtime
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: realtime
+  template:
+    metadata:
+      labels:
+        app: realtime
+    spec:
+      containers:
+        - name: realtime
+          image: supabase/realtime:v0.24.5
+          ports:
+            - containerPort: 4000
+          env:
+            - name: DB_HOST
+              value: "pgbouncer.platform.svc.cluster.local"
+            - name: DB_PORT
+              value: "6432"
+            - name: DB_NAME
+              value: "postgres"
+            - name: DB_USER
+              value: "postgres"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: DB_PASSWORD
+            - name: PORT
+              value: "4000"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: JWT_SECRET
+            - name: ANON_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: ANON_KEY
+          readinessProbe:
+            httpGet:
+              path: /socket
+              port: 4000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: realtime
+  labels:
+    app: realtime
+spec:
+  selector:
+    app: realtime
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
