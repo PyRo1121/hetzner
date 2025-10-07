@@ -294,16 +294,116 @@ setup_supabase() {
                     fi
                 else
                     log "Failed to download fresh docker-compose.yml"
-                    # Last resort: manually fix the current file
-                    cp docker-compose.yml docker-compose.yml.backup
-                    sed -i '/container_name: supabase-analytics$/d' docker-compose.yml
+                    # Create a minimal, working docker-compose.yml from scratch
+                    log "Creating minimal working docker-compose.yml..."
+                    cat > docker-compose.yml << 'EOF'
+version: '3.8'
+services:
+  db:
+    image: supabase/postgres:15.1.0.147
+    container_name: supabase-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+    volumes:
+      - ./volumes/db/data:/var/lib/postgresql/data
+      - ./volumes/db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -h localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rest:
+    image: postgrest/postgrest:v12.0.2
+    container_name: supabase-rest
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMA: public,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+    ports:
+      - "54321:3000"
+
+  auth:
+    image: supabase/gotrue:v2.151.0
+    container_name: supabase-auth
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: http://localhost:9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      GOTRUE_SITE_URL: http://localhost:3000
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_DISABLE_SIGNUP: "false"
+    ports:
+      - "54322:9999"
+
+  kong:
+    image: kong:3.4
+    container_name: supabase-kong
+    restart: unless-stopped
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,http-log
+    volumes:
+      - ./volumes/api/kong.yml:/var/lib/kong/kong.yml
+    ports:
+      - "54320:8000"
+      - "54321:3000"
+    depends_on:
+      rest:
+        condition: service_started
+      auth:
+        condition: service_started
+
+  storage:
+    image: supabase/storage-api:v0.46.5
+    container_name: supabase-storage
+    restart: unless-stopped
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      FILE_SIZE_LIMIT: 52428800
+    volumes:
+      - ./volumes/storage:/var/lib/storage
+    ports:
+      - "54324:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_started
+
+volumes:
+  db-data:
+  storage-data:
+EOF
                     if docker compose config --quiet 2>/dev/null; then
-                        log "✓ Manually fixed existing docker-compose.yml"
+                        log "✓ Created minimal working docker-compose.yml successfully"
                     else
-                        mv docker-compose.yml.backup docker-compose.yml
-                        log "⚠ All fixes failed, manual intervention required"
+                        log "⚠ Even minimal compose file failed, this indicates deeper issues"
                     fi
-                fi
             fi
         else
             log "✓ docker-compose.yml syntax is valid"
