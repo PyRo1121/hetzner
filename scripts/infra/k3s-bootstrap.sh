@@ -53,6 +53,27 @@ generate_jwt() {
   printf '%s.%s.%s' "$h" "$b" "$s"
 }
 
+# Wait helper and Kubernetes API readiness check (must be defined before use)
+bwait() { sleep "$1"; }
+
+wait_for_k8s_api() {
+  log "Waiting for Kubernetes API to become reachable"
+  local attempts=0 max_attempts=60 # ~5 minutes
+  while (( attempts < max_attempts )); do
+    if kubectl version --short >/dev/null 2>&1; then
+      if kubectl get nodes >/dev/null 2>&1; then
+        log "Kubernetes API is ready"
+        return 0
+      fi
+    fi
+    attempts=$((attempts+1))
+    bwait 5
+  done
+  err "Kubernetes API not ready after 5 minutes. Inspect k3s service logs."
+  journalctl -u k3s -n 100 --no-pager || true
+  exit 1
+}
+
 install_prereqs() {
   export TZ=${TZ:-UTC}
   timedatectl set-timezone "$TZ" || true
@@ -160,11 +181,12 @@ install_minio() {
 install_observability() {
   log "Installing kube-prometheus-stack"
   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+  helm repo add grafana https://grafana.github.io/helm-charts
+  helm repo update
   helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack -n monitoring --create-namespace \
     --set grafana.adminPassword=${GRAFANA_ADMIN_PASSWORD:-$(rand)}
 
   log "Installing Loki + Promtail"
-  helm repo add grafana https://grafana.github.io/helm-charts
   helm upgrade --install loki grafana/loki -n monitoring --set persistence.enabled=false
   helm upgrade --install promtail grafana/promtail -n monitoring --set config.lokiAddress=http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
 
@@ -279,22 +301,3 @@ main() {
 }
 
 main "$@"
-bwait() { sleep "$1"; }
-
-wait_for_k8s_api() {
-  log "Waiting for Kubernetes API to become reachable"
-  local attempts=0 max_attempts=60 # ~5 minutes
-  while (( attempts < max_attempts )); do
-    if kubectl version --short >/dev/null 2>&1; then
-      if kubectl get nodes >/dev/null 2>&1; then
-        log "Kubernetes API is ready"
-        return 0
-      fi
-    fi
-    attempts=$((attempts+1))
-    bwait 5
-  done
-  err "Kubernetes API not ready after 5 minutes. Inspect k3s service logs."
-  journalctl -u k3s -n 100 --no-pager || true
-  exit 1
-}
