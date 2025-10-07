@@ -965,17 +965,17 @@ setup_redis() {
     # Wait for cleanup to complete
     sleep 5
 
-    # Check if port 6379 is in use by other processes
-    if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
-        log "⚠️  Port 6379 is currently in use. Checking what process is using it..."
+    # Check if port 6380 is in use by other processes (using 6380 instead of 6379)
+    if netstat -tuln 2>/dev/null | grep -q ":6380 "; then
+        log "⚠️  Port 6380 is currently in use. Checking what process is using it..."
         log "🔍 Running diagnostic commands:"
-        ss -tlnp | grep ":6379 " 2>/dev/null || lsof -i :6379 2>/dev/null || echo "   (No detailed process info available)"
+        ss -tlnp | grep ":6380 " 2>/dev/null || lsof -i :6380 2>/dev/null || echo "   (No detailed process info available)"
 
-        log "Port 6379 is in use by another process, attempting to free it..."
-        # Try to find and kill the process using port 6379
-        local pid=$(lsof -ti:6379 2>/dev/null || ss -tlnp 2>/dev/null | grep ":6379 " | awk '{print $6}' | cut -d',' -f2 | cut -d'=' -f2 | head -1)
+        log "Port 6380 is in use by another process, attempting to free it..."
+        # Try to find and kill the process using port 6380
+        local pid=$(lsof -ti:6380 2>/dev/null || ss -tlnp 2>/dev/null | grep ":6380 " | awk '{print $6}' | cut -d',' -f2 | cut -d'=' -f2 | head -1)
         if [[ -n "$pid" ]]; then
-            log "Killing process $pid using port 6379..."
+            log "Killing process $pid using port 6380..."
             kill -9 $pid 2>/dev/null || true
             sleep 3
         fi
@@ -991,12 +991,12 @@ setup_redis() {
 
     # Also check for and kill any Redis processes by port
     if command -v fuser >/dev/null 2>&1; then
-        log "Using fuser to kill processes on port 6379..."
-        fuser -k 6379/tcp 2>/dev/null || true
+        log "Using fuser to kill processes on port 6380..."
+        fuser -k 6380/tcp 2>/dev/null || true
         sleep 2
     fi
 
-    # Kill processes using port 6379 directly with killall if available
+    # Kill processes using port 6380 directly with killall if available
     if command -v killall >/dev/null 2>&1; then
         log "Using killall to kill Redis processes..."
         killall -9 redis-server 2>/dev/null || true
@@ -1004,13 +1004,13 @@ setup_redis() {
         sleep 2
     fi
 
-    # Final aggressive cleanup - check and kill any remaining processes on port 6379
-    if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
-        log "Port 6379 still in use, final aggressive cleanup..."
+    # Final aggressive cleanup - check and kill any remaining processes on port 6380
+    if netstat -tuln 2>/dev/null | grep -q ":6380 "; then
+        log "Port 6380 still in use, final aggressive cleanup..."
         # Try to get all PIDs and kill them forcefully
-        local all_pids=$(lsof -ti:6379 2>/dev/null | xargs echo || ss -tlnp 2>/dev/null | grep ":6379 " | awk '{print $6}' | cut -d',' -f2 | cut -d'=' -f2 | xargs echo)
+        local all_pids=$(lsof -ti:6380 2>/dev/null | xargs echo || ss -tlnp 2>/dev/null | grep ":6380 " | awk '{print $6}' | cut -d',' -f2 | cut -d'=' -f2 | xargs echo)
         if [[ -n "$all_pids" ]]; then
-            log "Force killing all processes using port 6379: $all_pids"
+            log "Force killing all processes using port 6380: $all_pids"
             for pid in $all_pids; do
                 kill -9 $pid 2>/dev/null || true
                 # Also try to kill the parent process
@@ -1024,30 +1024,16 @@ setup_redis() {
         fi
     fi
 
-    # Kill any process using port 6379 more aggressively
-    if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
-        log "Port 6379 still in use, using more aggressive cleanup..."
-        # Get all PIDs using port 6379
-        local pids=$(lsof -ti:6379 2>/dev/null || ss -tlnp 2>/dev/null | grep ":6379 " | awk '{print $6}' | cut -d',' -f2 | cut -d'=' -f2)
-        for pid in $pids; do
-            if [[ -n "$pid" ]]; then
-                log "Force killing process $pid using port 6379..."
-                kill -9 $pid 2>/dev/null || true
-            fi
-        done
-        sleep 5
-    fi
-
     # Final check - ensure port is free
-    if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
-        log "CRITICAL: Port 6379 still in use after all cleanup attempts"
+    if netstat -tuln 2>/dev/null | grep -q ":6380 "; then
+        log "CRITICAL: Port 6380 still in use after all cleanup attempts"
         log "🔍 TROUBLESHOOTING: Run these commands manually to identify the process:"
-        log "   sudo netstat -tlnp | grep :6379"
-        log "   sudo lsof -i :6379"
-        log "   sudo ss -tlnp | grep :6379"
+        log "   sudo netstat -tlnp | grep :6380"
+        log "   sudo lsof -i :6380"
+        log "   sudo ss -tlnp | grep :6380"
         log "   sudo ps aux | grep redis"
         log ""
-        log "💡 If you find a process using port 6379, kill it with:"
+        log "💡 If you find a process using port 6380, kill it with:"
         log "   sudo kill -9 <PID>"
         log "   sudo killall -9 redis-server"
         log "   sudo killall -9 redis"
@@ -1057,31 +1043,37 @@ setup_redis() {
         log "   docker stop <container_id> && docker rm <container_id>"
         log ""
         log "🛑 STOPPING DEPLOYMENT: Please manually resolve the port conflict and re-run the script."
-        error "Failed to free port 6379. Manual intervention required."
+        error "Failed to free port 6380. Manual intervention required."
         exit 1
     fi
 
-    log "✅ Port 6379 confirmed free - proceeding with Redis deployment"
+    log "✅ Port 6380 confirmed free - proceeding with Redis deployment"
 
     # FINAL PORT VERIFICATION before Docker run
-    if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
-        log "❌ CRITICAL: Port 6379 became occupied during cleanup! Aborting Redis deployment."
-        log "🔍 Checking what is now using port 6379:"
-        ss -tlnp | grep ":6379 " 2>/dev/null || lsof -i :6379 2>/dev/null || echo "   Unable to determine process"
+    if netstat -tuln 2>/dev/null | grep -q ":6380 "; then
+        log "❌ CRITICAL: Port 6380 became occupied during cleanup! Aborting Redis deployment."
+        log "🔍 Checking what is now using port 6380:"
+        ss -tlnp | grep ":6380 " 2>/dev/null || lsof -i :6380 2>/dev/null || echo "   Unable to determine process"
         error "Port conflict detected at deployment time. Please resolve manually."
         exit 1
     fi
 
-    # Start Redis container with 2025 security and performance standards
-    log "Starting Redis server with enhanced security..."
+    # Start Redis container with host networking to avoid port mapping issues
+    log "Starting Redis server with host networking to avoid port conflicts..."
     docker run -d \
         --name redis \
+        --network host \
         --restart unless-stopped \
-        -p 127.0.0.1:6379:6379 \
         --memory 512m \
         --cpus 0.5 \
         redis:7-alpine \
-        redis-server --protected-mode no --bind 0.0.0.0 --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass "$(openssl rand -hex 16)" --rename-command FLUSHDB "" --rename-command FLUSHALL "" --rename-command SHUTDOWN SHUTDOWN
+        redis-server --protected-mode no --bind 127.0.0.1 --port 6380 --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass "$(openssl rand -hex 16)" --rename-command FLUSHDB "" --rename-command FLUSHALL "" --rename-command SHUTDOWN SHUTDOWN
+
+    # Update Prometheus configuration to use new Redis port
+    if [[ -f /opt/prometheus/prometheus.yml ]]; then
+        sed -i 's/localhost:6379/localhost:6380/g' /opt/prometheus/prometheus.yml
+        log "Updated Prometheus configuration to use Redis on port 6380"
+    fi
 
     # Wait for Redis to be ready
     sleep 10
