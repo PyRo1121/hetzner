@@ -267,10 +267,6 @@ setup_supabase() {
             log "Found $running_essential/4 essential Supabase services running, continuing..."
             success "✅ Supabase deployment completed with $running_essential essential services"
         else
-            error "Only $running_essential/4 essential services running"
-            error "This might indicate insufficient resources or port conflicts"
-
-            # Run diagnostics
             log "Running deployment diagnostics..."
             echo "=== SYSTEM RESOURCES ==="
             free -h
@@ -279,20 +275,27 @@ setup_supabase() {
             df -h
             echo ""
             echo "=== PORT 5432 CONFLICTS ==="
-            netstat -tlnp | grep :5432 || echo "Port 5432 is free"
+            ss -tlnp | grep :5432 || echo "Port 5432 is free"
             echo ""
             echo "=== DOCKER STATUS ==="
             docker info 2>/dev/null | head -10
             echo ""
-            echo "=== RECENT DOCKER LOGS ==="
-            docker logs $(docker ps -lq 2>/dev/null) 2>/dev/null | tail -10 || echo "No recent containers"
-
-            error "Deployment failed due to resource or configuration issues"
-            error "Please check the diagnostics above and ensure:"
-            error "1. At least 8GB RAM available (free -h)"
-            error "2. At least 20GB disk space available (df -h)"
-            error "3. Port 5432 is not already in use (netstat -tlnp | grep :5432)"
-            error "4. Docker is running properly (docker info)"
+            echo "=== DOCKER-COMPOSE VALIDATION ==="
+            if [[ -f docker-compose.yml ]]; then
+                echo "docker-compose.yml exists"
+                docker compose config --quiet && echo "✓ docker-compose.yml syntax is valid" || echo "✗ docker-compose.yml has syntax errors"
+            else
+                echo "✗ docker-compose.yml not found"
+            fi
+            echo ""
+            echo "=== SUPABASE REPO STATUS ==="
+            ls -la supabase/ 2>/dev/null || echo "Supabase directory not found"
+            echo ""
+            echo "=== DOCKER NETWORKS ==="
+            docker network ls
+            echo ""
+            echo "=== DOCKER VOLUMES ==="
+            docker volume ls | grep supabase || echo "No Supabase volumes found"
             exit 1
         fi
     else
