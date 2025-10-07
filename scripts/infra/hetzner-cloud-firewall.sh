@@ -29,6 +29,35 @@ require_var() {
   fi
 }
 
+ensure_jq() {
+  if command -v jq >/dev/null 2>&1; then
+    log "jq present"
+    return
+  fi
+  log "Installing jq"
+  if command -v apt-get >/dev/null 2>&1; then
+    if [[ $EUID -eq 0 ]]; then
+      apt-get update -y && apt-get install -y jq
+    else
+      sudo apt-get update -y && sudo apt-get install -y jq
+    fi
+  elif command -v yum >/dev/null 2>&1; then
+    if [[ $EUID -eq 0 ]]; then
+      yum install -y jq
+    else
+      sudo yum install -y jq
+    fi
+  elif command -v apk >/dev/null 2>&1; then
+    if [[ $EUID -eq 0 ]]; then
+      apk add --no-cache jq
+    else
+      sudo apk add --no-cache jq
+    fi
+  else
+    err "jq command not found and automatic install unsupported. Please install jq via your package manager."; exit 1
+  fi
+}
+
 install_hcloud_cli() {
   if command -v hcloud >/dev/null 2>&1; then
     log "hcloud CLI present"
@@ -72,6 +101,7 @@ main() {
   fi
 
   install_hcloud_cli
+  ensure_jq
   export HCLOUD_TOKEN
 
   # Resolve server ID if name provided
