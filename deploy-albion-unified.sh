@@ -205,7 +205,7 @@ setup_supabase() {
     # Clone Supabase repository
     if [[ ! -d supabase ]]; then
         log "Cloning Supabase repository..."
-        retry_with_backoff 3 5 "git clone $SUPABASE_REPO"
+        retry_with_backoff 3 5 git clone $SUPABASE_REPO
     fi
 
     cd supabase/docker
