@@ -112,7 +112,8 @@ EOF
 
 install_k3s_helm() {
   log "Installing k3s"
-  curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644" sh -
+  # Disable Traefik since we install ingress-nginx
+  curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644 --disable traefik" sh -
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
   ln -sf /usr/local/bin/kubectl /usr/bin/kubectl || true
   wait_for_k8s_api
@@ -126,6 +127,7 @@ install_ingress_certmanager() {
   helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx || true
   helm repo update
   helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx \
+    --atomic --timeout 10m \
     --set controller.metrics.enabled=true
   kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=5m || err "ingress-nginx rollout failed"
 
@@ -134,6 +136,7 @@ install_ingress_certmanager() {
   helm repo add jetstack https://charts.jetstack.io || true
   helm repo update
   helm upgrade --install cert-manager jetstack/cert-manager -n cert-manager --create-namespace \
+    --atomic --timeout 10m \
     --set installCRDs=false
   kubectl rollout status deployment/cert-manager -n cert-manager --timeout=2m || err "cert-manager rollout failed"
   kubectl rollout status deployment/cert-manager-cainjector -n cert-manager --timeout=2m || err "cert-manager-cainjector rollout failed"
@@ -164,6 +167,7 @@ install_db_pool() {
   helm repo update
   PG_PASSWORD=${PG_PASSWORD:-$(rand)}
   helm upgrade --install postgres bitnami/postgresql -n platform \
+    --atomic --timeout 10m \
     --set auth.postgresPassword="$PG_PASSWORD" \
     --set primary.persistence.size=20Gi \
     --set primary.resources.requests.cpu=500m \
@@ -180,6 +184,7 @@ install_db_pool() {
   HASH=$(printf '%s%s' "$DB_PASS" "$USERNAME" | md5sum | cut -d' ' -f1)
   MD5PASS="md5$HASH"
   helm upgrade --install pgbouncer icoretech/pgbouncer -n platform \
+    --atomic --timeout 10m \
     --set replicaCount=1 \
     --set pgbouncer.auth_type=md5 \
     --set pgbouncer.pool_mode=transaction \
@@ -188,6 +193,14 @@ install_db_pool() {
     --set config.databases.postgres="host=postgres-postgresql.platform.svc.cluster.local port=5432 dbname=postgres" \
     --set config.userlist."$USERNAME"="$MD5PASS"
   kubectl rollout status deployment/pgbouncer -n platform --timeout=2m || err "PgBouncer rollout failed"
+
+  # Fallback: create a temporary TLS secret if expected by downstream manifests
+  if ! kubectl get secret oaf-tls -n platform >/dev/null 2>&1; then
+    log "Creating temporary TLS secret 'oaf-tls' in 'platform' namespace"
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /tmp/oaf.key -out /tmp/oaf.crt -subj "/CN=oaf.local"
+    kubectl create secret tls oaf-tls -n platform --cert=/tmp/oaf.crt --key=/tmp/oaf.key || true
+    rm -f /tmp/oaf.crt /tmp/oaf.key || true
+  fi
 }
 
 install_minio() {
@@ -197,10 +210,14 @@ install_minio() {
   fi
   log "Installing MinIO"
   helm repo update
-  helm upgrade --install minio bitnami/minio -n platform --set mode=standalone \
+  helm upgrade --install minio bitnami/minio -n platform --atomic --timeout 10m --set mode=standalone \
     --set auth.rootUser=${S3_ACCESS_KEY:-minio_access} \
     --set auth.rootPassword=${S3_SECRET_KEY:-minio_secret} \
-    --set persistence.size=25Gi
+    --set persistence.size=25Gi \
+    --set image.tag="" \
+    --set console.enabled=true \
+    --set console.image.repository=bitnami/minio-console \
+    --set console.image.tag=""
   kubectl rollout status deployment/minio -n platform --timeout=2m || err "MinIO rollout failed"
 }
 
@@ -210,17 +227,18 @@ install_observability() {
   helm repo add grafana https://grafana.github.io/helm-charts || true
   helm repo update
   helm upgrade --install kube-prom-stack prometheus-community/kube-prometheus-stack -n monitoring --create-namespace \
+    --atomic --timeout 10m \
     --set grafana.adminPassword=${GRAFANA_ADMIN_PASSWORD:-$(rand)}
   kubectl rollout status deployment/kube-prom-stack-grafana -n monitoring --timeout=2m || err "Grafana rollout failed"
 
   log "Installing Loki + Promtail"
-  helm upgrade --install loki grafana/loki -n monitoring --set persistence.enabled=false
+  helm upgrade --install loki grafana/loki -n monitoring --atomic --timeout 10m --set persistence.enabled=false
   kubectl rollout status statefulset/loki -n monitoring --timeout=2m || err "Loki rollout failed"
-  helm upgrade --install promtail grafana/promtail -n monitoring --set config.lokiAddress=http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
+  helm upgrade --install promtail grafana/promtail -n monitoring --atomic --timeout 10m --set config.lokiAddress=http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push
   kubectl rollout status daemonset/promtail -n monitoring --timeout=2m || err "Promtail rollout failed"
 
   log "Installing Blackbox Exporter"
-  helm upgrade --install blackbox-exporter prometheus-community/prometheus-blackbox-exporter -n monitoring
+  helm upgrade --install blackbox-exporter prometheus-community/prometheus-blackbox-exporter -n monitoring --atomic --timeout 10m
   kubectl rollout status deployment/blackbox-exporter-prometheus-blackbox-exporter -n monitoring --timeout=2m || err "Blackbox exporter rollout failed"
 }
 

@@ -67,3 +67,115 @@ Recommended approach for data
 - Offsite backups: add `wal-g` cronjob to push base backups to your S3 volume.
 - Dashboards/alerts: import Supabase/Postgres dashboards into Grafana; configure Alertmanager.
 - Security: restrict SSH to management IPs; keep MinIO console non-public.
+## Important Updates (October 2025)
+
+These notes reflect fixes and operational guidance discovered during recent k3s boots on Hetzner. Pull the latest repo before running the bootstrap script.
+
+### API Readiness Wait
+- The bootstrap now waits for the Kubernetes API to be reachable before any Helm operations.
+- It polls `kubectl version --short` and `kubectl get nodes` until success (up to 5 minutes). A 30–120s wait is normal on first boot while images pull.
+- If it exceeds 5 minutes, check service health: `systemctl status k3s`, `kubectl get nodes`, and `kubectl get pods -n kube-system`.
+
+### Helm Repositories and Updates
+- Add observability chart repos early and do a full index refresh to avoid stale chart metadata:
+
+```
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+```
+
+- Do not interrupt `helm repo update`; it can take a minute on fresh hosts.
+
+### MinIO Chart: Use Valid Images
+- Avoid pinning non-existent Bitnami tags. Let the chart select compatible defaults or pin only known-good versions.
+- The console repository has changed: use `bitnami/minio-console` (not `minio-object-browser`).
+
+Example `values-minio.yaml` (remove or leave tags empty to use chart defaults):
+
+```
+image:
+  repository: bitnami/minio
+  tag: ""
+
+console:
+  enabled: true
+  image:
+    repository: bitnami/minio-console
+    tag: ""
+```
+
+Install or update MinIO (create the namespace if needed):
+
+```
+kubectl create namespace platform --dry-run=client -o yaml | kubectl apply -f -
+helm upgrade --install minio bitnami/minio -n platform -f ./values-minio.yaml
+```
+
+If you don’t need the console UI, set `console.enabled: false`.
+
+### PgBouncer TLS Secret Requirements
+- PgBouncer mounts a TLS secret named `oaf-tls` in namespace `platform`. Create it before PgBouncer starts.
+
+Option A (temporary): self-signed certificate
+
+```
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout oaf.key -out oaf.crt -subj "/CN=oaf.local"
+kubectl create secret tls oaf-tls -n platform --cert=oaf.crt --key=oaf.key
+```
+
+Option B (preferred): cert-manager-managed certificate
+
+Ensure cert-manager is installed and a `ClusterIssuer` (e.g., `letsencrypt-prod`) exists, then apply:
+
+```
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: oaf-tls
+  namespace: platform
+spec:
+  secretName: oaf-tls
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  commonName: your.domain.example
+  dnsNames:
+    - your.domain.example
+```
+
+Check status and secret materialization:
+
+```
+kubectl describe certificate oaf-tls -n platform
+kubectl get secret oaf-tls -n platform
+```
+
+### DNS Warning: Nameserver Limits Exceeded
+- k3s/CoreDNS may log “Nameserver limits exceeded” when `/etc/resolv.conf` lists multiple IPv6/IPv4 nameservers. CoreDNS forwards to a subset; this is usually benign.
+- If image pulls or external resolution fail, consider:
+  - Trim resolv.conf to 1–2 reliable resolvers, or
+  - Configure CoreDNS `forward` plugin to a single resolver (e.g., `1.1.1.1`).
+
+### Run With the Updated Script
+- After pulling the latest repository, run the script from the repo path (avoid stale copies under `/root`). For example:
+
+```
+sudo bash ./scripts/infra/k3s-bootstrap.sh
+```
+
+- If running on a remote host, sync or `git pull` there, then execute the script from the repository directory.
+
+### Quick Verification Checklist
+- `kubectl get nodes` shows Ready node(s).
+- `kubectl get pods -A` core pods Running; ingress-nginx controller Ready.
+- MinIO pods in `platform` namespace Running (no `ImagePullBackOff`).
+- `kubectl get secret oaf-tls -n platform` exists before PgBouncer starts.
+- `helm list -A` shows expected releases; `helm get values minio -n platform` reflects the above values.
+
+### Troubleshooting Commands
+- Events: `kubectl get events -A --sort-by=.metadata.creationTimestamp | tail -n 50`
+- Pod details: `kubectl describe pod <name> -n <ns>`
+- k3s logs: `journalctl -u k3s -n 200 --no-pager`
