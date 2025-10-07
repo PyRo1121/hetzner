@@ -1070,10 +1070,7 @@ setup_redis() {
         redis-server --protected-mode no --bind 127.0.0.1 --port 6380 --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass "$(openssl rand -hex 16)" --rename-command FLUSHDB "" --rename-command FLUSHALL "" --rename-command SHUTDOWN SHUTDOWN
 
     # Update Prometheus configuration to use new Redis port
-    if [[ -f /opt/prometheus/prometheus.yml ]]; then
-        sed -i 's/localhost:6379/localhost:6380/g' /opt/prometheus/prometheus.yml
-        log "Updated Prometheus configuration to use Redis on port 6380"
-    fi
+    # Note: Configuration now uses correct port 6380 by default
 
     # Wait for Redis to be ready
     sleep 10
@@ -1144,7 +1141,7 @@ scrape_configs:
     static_configs:
       - targets:
         - 'localhost:8000'  # Caddy
-        - 'localhost:6379'  # Redis
+        - 'localhost:6380'  # Redis
         - 'localhost:9000'  # MinIO
         - 'localhost:3000'  # Grafana
         - 'localhost:9093'  # Alertmanager
@@ -1205,14 +1202,22 @@ EOF
         --cpus 0.5 \
         prom/prometheus
 
-    # Wait for Prometheus to be ready
+    # Wait for Prometheus to be ready with better error checking
     sleep 10
 
-    # Verify Prometheus is running
+    # Verify Prometheus is running and check logs if failed
     if ! docker ps | grep -q prometheus; then
+        log "❌ Prometheus container not running, checking logs..."
+        docker logs prometheus 2>&1 | head -20 || log "No logs available"
+        log "Common Prometheus startup issues:"
+        log "- Port conflicts (check if ports 9090, 9093, 9094 are free)"
+        log "- Configuration syntax errors"
+        log "- Insufficient disk space"
         error "Prometheus failed to start"
         exit 1
     fi
+
+    log "Prometheus is running successfully"
 
     success "✅ Prometheus metrics setup completed"
 }
