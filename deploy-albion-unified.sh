@@ -241,19 +241,26 @@ setup_supabase() {
 
     # Start Supabase services (excluding analytics which often fails)
     log "Starting Supabase services..."
-    # First try to start all services, but don't fail if analytics fails
-    if ! timeout 300 docker compose up -d 2>/dev/null; then
-        log "Some services failed to start or timed out, trying to start core services without analytics..."
-        # Stop everything and restart without analytics
-        docker compose down 2>/dev/null || true
-        sleep 5
-        # Start all services except analytics with a reasonable timeout
-        timeout 300 docker compose up -d --scale supabase-analytics=0
+    # Disable analytics in docker-compose.yml if it exists
+    if [[ -f docker-compose.yml ]]; then
+        sed -i 's/^  analytics:/#  analytics:/' docker-compose.yml 2>/dev/null || true
+        sed -i 's/^    analytics:/#    analytics:/' docker-compose.yml 2>/dev/null || true
     fi
 
-    # Give services extra time to stabilize
-    log "Allowing services to stabilize..."
-    sleep 30
+    # Start services with timeout protection
+    if ! timeout 300 docker compose up -d 2>/dev/null; then
+        log "Services failed to start within timeout, checking status..."
+        docker ps --filter name=supabase
+
+        # If some services are running but others failed, continue anyway
+        running_count=$(docker ps --filter name=supabase --format "{{.Names}}" | wc -l)
+        if [[ $running_count -gt 5 ]]; then
+            log "Found $running_count Supabase services running, continuing..."
+        else
+            error "Too few Supabase services running ($running_count), deployment failed"
+            exit 1
+        fi
+    fi
 
     # Wait for services to be ready
     log "Waiting for Supabase services to be ready..."
