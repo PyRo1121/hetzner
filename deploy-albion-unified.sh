@@ -228,23 +228,32 @@ setup_supabase() {
     sed -i "s|^ANON_KEY=.*|ANON_KEY=$ANON_KEY|" .env
     sed -i "s|^SERVICE_ROLE_KEY=.*|SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY|" .env
 
-    # Configure for production use
+    # Configure for production use with resource optimizations
     echo "POSTGRES_SHARED_BUFFERS=512MB" >> .env
     echo "POSTGRES_EFFECTIVE_CACHE_SIZE=2GB" >> .env
     echo "POSTGRES_WORK_MEM=16MB" >> .env
     echo "POSTGRES_MAINTENANCE_WORK_MEM=128MB" >> .env
+    # Disable analytics service which is resource-intensive and often problematic
+    echo "ANALYTICS_ENABLED=false" >> .env
+    # Optimize for single-server deployment
+    echo "IMGPROXY_ENABLE_WEBP_DETECTION=false" >> .env
+    echo "IMGPROXY_ENABLE_CLIENT_HINTS_SUPPORT=false" >> .env
 
     # Start Supabase services (excluding analytics which often fails)
     log "Starting Supabase services..."
     # First try to start all services, but don't fail if analytics fails
-    if ! docker compose up -d 2>/dev/null; then
-        log "Some services failed to start, trying to start core services without analytics..."
+    if ! timeout 300 docker compose up -d 2>/dev/null; then
+        log "Some services failed to start or timed out, trying to start core services without analytics..."
         # Stop everything and restart without analytics
         docker compose down 2>/dev/null || true
         sleep 5
-        # Start all services except analytics
-        docker compose up -d --scale supabase-analytics=0
+        # Start all services except analytics with a reasonable timeout
+        timeout 300 docker compose up -d --scale supabase-analytics=0
     fi
+
+    # Give services extra time to stabilize
+    log "Allowing services to stabilize..."
+    sleep 30
 
     # Wait for services to be ready
     log "Waiting for Supabase services to be ready..."
