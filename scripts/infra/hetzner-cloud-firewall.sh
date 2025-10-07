@@ -45,7 +45,18 @@ install_hcloud_cli() {
   HC_VER="v1.42.0" # update as needed
   curl -L "https://github.com/hetznercloud/cli/releases/download/${HC_VER}/hcloud-linux-${ARCH_LABEL}.tar.gz" -o "$TMP/hcloud.tar.gz"
   tar -xzf "$TMP/hcloud.tar.gz" -C "$TMP"
-  install -m 0755 "$TMP/hcloud-linux-${ARCH_LABEL}/hcloud" /usr/local/bin/hcloud
+  # Locate extracted binary (release archives may be flat or in a subdir)
+  if [[ -f "$TMP/hcloud-linux-${ARCH_LABEL}/hcloud" ]]; then
+    SRC="$TMP/hcloud-linux-${ARCH_LABEL}/hcloud"
+  elif [[ -f "$TMP/hcloud" ]]; then
+    SRC="$TMP/hcloud"
+  else
+    SRC=$(find "$TMP" -maxdepth 2 -type f -name hcloud | head -n1 || true)
+    if [[ -z "${SRC:-}" ]]; then
+      err "Failed to locate hcloud binary after extraction"; rm -rf "$TMP"; exit 1
+    fi
+  fi
+  install -m 0755 "$SRC" /usr/local/bin/hcloud
   rm -rf "$TMP"
 }
 
