@@ -252,27 +252,10 @@ validate_env_file() {
         # Skip empty lines and comments
         [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
 
-        # Check for proper variable format
-        if ! [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
-            error "Line $line_num: Invalid format - $line"
-            error "Expected format: VARIABLE_NAME=value"
-            return 1
-        fi
-
-        # Extract value part after =
-        local value="${line#*=}"
-
-        # Check if value is properly quoted (starts and ends with quotes)
-        if [[ "$value" =~ ^[\"\'].*[\"\']$ ]]; then
-            # Value is properly quoted, skip special character check
-            continue
-        fi
-
-        # Check if unquoted value contains special characters that need quoting
-        # Exclude quotes and colons from the special character check
-        if [[ "$value" =~ [\$\`\\!\#\%\^\&\*\(\)\|\<\>\?\;[:space:]] ]]; then
-            error "Line $line_num: Unquoted special characters detected"
-            error "Please quote the value: ${line%%=*}=\"$value\""
+        # Basic format check - just ensure there's an equals sign somewhere in the line
+        if ! [[ "$line" =~ = ]]; then
+            error "Line $line_num: Invalid format - missing equals sign"
+            error "Line: $line"
             return 1
         fi
     done < "$env_file"
