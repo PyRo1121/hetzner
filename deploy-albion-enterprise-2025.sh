@@ -637,16 +637,7 @@ EOF
 
     success "   ⚡ SIMD WebAssembly processing configured for CPU-only"
 
-    # 6. Monitoring (Scaled for VPS-3)
-    log "Setting up monitoring optimized for VPS-3..."
-
-    # Reduce Prometheus retention and memory usage
-    sed -i 's/storage.tsdb.retention.time: 200h/storage.tsdb.retention.time: 48h/' /opt/prometheus/prometheus.yml
-    sed -i 's/storage.tsdb.retention.size: 10GB/storage.tsdb.retention.size: 2GB/' /opt/prometheus/prometheus.yml
-
-    success "   📊 Monitoring optimized for VPS-3 resources"
-
-    # 7. Database Optimizations for VPS-3
+    # 6. Database Optimizations for VPS-3
     log "Optimizing databases for VPS-3 (8 vCores, 24GB RAM)..."
 
     # PostgreSQL configuration for VPS-3
