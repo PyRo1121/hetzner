@@ -111,13 +111,13 @@ setup_system() {
 
     # Update system packages
     log "Updating system packages..."
-    retry_with_backoff 3 5 "/usr/bin/apt-get update -y"
-    retry_with_backoff 3 5 "/usr/bin/apt-get upgrade -y"
-    retry_with_backoff 3 5 "/usr/bin/apt-get autoremove -y"
+    retry_with_backoff 3 5 /usr/bin/apt-get update -y
+    retry_with_backoff 3 5 /usr/bin/apt-get upgrade -y
+    retry_with_backoff 3 5 /usr/bin/apt-get autoremove -y
 
     # Install essential packages
     log "Installing essential packages..."
-    retry_with_backoff 3 5 "/usr/bin/apt-get install -y" \
+    retry_with_backoff 3 5 /usr/bin/apt-get install -y \
         ufw fail2ban unattended-upgrades apt-transport-https \
         ca-certificates curl wget jq unzip htop iotop ncdu \
         git openssl
