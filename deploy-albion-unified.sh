@@ -241,23 +241,42 @@ setup_supabase() {
 
     # Start Supabase services (excluding analytics which often fails)
     log "Starting Supabase services..."
-    # Disable analytics in docker-compose.yml if it exists
+
+    # Create a modified docker-compose.yml without analytics service
     if [[ -f docker-compose.yml ]]; then
-        sed -i 's/^  analytics:/#  analytics:/' docker-compose.yml 2>/dev/null || true
-        sed -i 's/^    analytics:/#    analytics:/' docker-compose.yml 2>/dev/null || true
+        cp docker-compose.yml docker-compose.yml.backup
+        # Remove analytics service completely from compose file
+        awk '
+        BEGIN { in_analytics = 0 }
+        /^  analytics:/ { in_analytics = 1; next }
+        /^  [a-zA-Z]/ && in_analytics { in_analytics = 0 }
+        !in_analytics { print }
+        ' docker-compose.yml > docker-compose-no-analytics.yml
+
+        # Use the modified compose file
+        COMPOSE_FILE=docker-compose-no-analytics.yml
     fi
 
     # Start services with timeout protection
-    if ! timeout 300 docker compose up -d 2>/dev/null; then
+    log "Starting Supabase services (analytics excluded)..."
+    if ! timeout 600 COMPOSE_FILE=$COMPOSE_FILE docker compose up -d 2>/dev/null; then
         log "Services failed to start within timeout, checking status..."
         docker ps --filter name=supabase
 
-        # If some services are running but others failed, continue anyway
-        running_count=$(docker ps --filter name=supabase --format "{{.Names}}" | wc -l)
-        if [[ $running_count -gt 5 ]]; then
-            log "Found $running_count Supabase services running, continuing..."
+        # Check if essential services are running
+        essential_services=("supabase-db" "supabase-kong" "supabase-rest" "supabase-auth")
+        running_essential=0
+
+        for service in "${essential_services[@]}"; do
+            if docker ps --filter name="$service" --format "{{.Names}}" | grep -q "$service"; then
+                ((running_essential++))
+            fi
+        done
+
+        if [[ $running_essential -ge 3 ]]; then
+            log "Found $running_essential/4 essential Supabase services running, continuing..."
         else
-            error "Too few Supabase services running ($running_count), deployment failed"
+            error "Only $running_essential/4 essential services running, deployment failed"
             exit 1
         fi
     fi
