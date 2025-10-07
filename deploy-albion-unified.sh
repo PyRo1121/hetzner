@@ -3,8 +3,8 @@
 # ALBION ONLINE WORLD-CLASS WEB HOSTING STACK DEPLOYMENT SCRIPT
 # ============================================================================
 # Complete Web Hosting Infrastructure for October 2025 Standards
-# Features: Supabase, Redis, Grafana, Monitoring, Database, File Storage
-# 10 Essential Services - Perfect for Web Applications
+# Features: Supabase, Redis, Grafana, Loki Logging, Monitoring, Database, File Storage
+# 10 Essential Services - Perfect for Web Applications + Enterprise Logging
 # ============================================================================
 
 # Exit on any error
@@ -42,6 +42,12 @@ ENABLE_UPTIME_KUMA=true    # Website uptime monitoring (essential for web hostin
 
 # Media & Entertainment (Disabled)
 ENABLE_JELLYFIN=false      # Media server (not needed for web hosting)
+
+# Logging & Observability (Optional but recommended)
+ENABLE_LOKI=true          # Log aggregation
+ENABLE_PROMTAIL=true      # Log shipping to Loki
+ENABLE_NODE_EXPORTER=true # System monitoring
+ENABLE_CADVISOR=true      # Docker container monitoring
 
 # ============================================================================
 # CONSTANTS AND CONFIGURATION
@@ -905,6 +911,266 @@ setup_uptime_kuma() {
 }
 
 # ============================================================================
+# PHASE 23: LOKI LOG AGGREGATION - WORLD-CLASS LOGGING
+# ============================================================================
+
+setup_loki() {
+    log "📝 === PHASE 23: Loki Log Aggregation Setup ==="
+
+    # Create Loki directories
+    mkdir -p /opt/loki/data
+
+    # Create Loki configuration
+    cat >/opt/loki-config.yml <<EOF
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /opt/loki
+  storage:
+    filesystem:
+      chunks_directory: /opt/loki/chunks
+      rules_directory: /opt/loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+
+ruler:
+  alertmanager_url: http://localhost:9093
+
+analytics:
+  reporting_enabled: false
+EOF
+
+    # Start Loki container
+    log "Starting Loki server..."
+    docker run -d \
+        --name loki \
+        --network host \
+        -v /opt/loki/data:/opt/loki \
+        -v /opt/loki-config.yml:/etc/loki/local-config.yaml \
+        grafana/loki:3.0 -config.file=/etc/loki/local-config.yaml
+
+    # Wait for Loki to be ready
+    sleep 10
+
+    # Verify Loki is running
+    if ! docker ps | grep -q loki; then
+        error "Loki failed to start"
+        exit 1
+    fi
+
+    success "✅ Loki log aggregation setup completed"
+}
+
+# ============================================================================
+# PHASE 24: PROMTAIL LOG SHIPPING - WORLD-CLASS LOG COLLECTION
+# ============================================================================
+
+setup_promtail() {
+    log "📤 === PHASE 24: Promtail Log Shipping Setup ==="
+
+    # Create Promtail directories
+    mkdir -p /opt/promtail
+
+    # Create Promtail configuration
+    cat >/opt/promtail-config.yml <<EOF
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /opt/promtail/positions.yaml
+
+clients:
+  - url: http://localhost:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: system
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: varlogs
+          __path__: /var/log/*log
+    pipeline_stages:
+      - match:
+          selector: '{job="varlogs"}'
+          stages:
+            - multiline:
+                firstline: '^\w{3} \d{1,2} \d{2}:\d{2}:\d{2}'
+                max_wait_time: 3s
+            - regex:
+                expression: '^(?P<timestamp>\w{3} \d{1,2} \d{2}:\d{2}:\d{2}) (?P<hostname>\w+) (?P<program>\w+)(\[(?P<pid>\d+)\])?: (?P<message>.*)$'
+            - labels:
+                timestamp:
+                hostname:
+                program:
+                pid:
+            - output:
+                source: message
+
+  - job_name: docker
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: docker
+          __path__: /var/lib/docker/containers/*/*-json.log
+    pipeline_stages:
+      - json:
+          expressions:
+            log: log
+            stream: stream
+            time: time
+      - labels:
+          stream:
+      - output:
+          source: log
+      - regex:
+          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z) (?P<container>\w+) (?P<program>\w+)(?:\[(?P<pid>\d+)\])?: (?P<message>.*)$'
+          source: log
+      - labels:
+          timestamp:
+          container:
+          program:
+          pid:
+      - output:
+          source: message
+
+  - job_name: supabase
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: supabase
+          __path__: /opt/supabase/supabase/docker/volumes/api/logs/*.log
+    pipeline_stages:
+      - match:
+          selector: '{job="supabase"}'
+          stages:
+            - regex:
+                expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (?P<level>\w+) (?P<message>.*)$'
+            - labels:
+                level:
+            - output:
+                source: message
+EOF
+
+    # Start Promtail container
+    log "Starting Promtail log shipping..."
+    docker run -d \
+        --name promtail \
+        --network host \
+        -v /opt/promtail:/opt/promtail \
+        -v /opt/promtail-config.yml:/etc/promtail/config.yml \
+        -v /var/log:/var/log \
+        -v /var/lib/docker/containers:/var/lib/docker/containers \
+        -v /opt/supabase:/opt/supabase \
+        grafana/promtail:3.0 -config.file=/etc/promtail/config.yml
+
+    # Wait for Promtail to be ready
+    sleep 5
+
+    # Verify Promtail is running
+    if ! docker ps | grep -q promtail; then
+        error "Promtail failed to start"
+        exit 1
+    fi
+
+    success "✅ Promtail log shipping setup completed"
+}
+
+# ============================================================================
+# PHASE 25: NODE EXPORTER - SYSTEM MONITORING
+# ============================================================================
+
+setup_node_exporter() {
+    log "📊 === PHASE 25: Node Exporter Setup ==="
+
+    # Start Node Exporter container
+    log "Starting Node Exporter for system monitoring..."
+    docker run -d \
+        --name node-exporter \
+        --network host \
+        -v /proc:/host/proc:ro \
+        -v /sys:/host/sys:ro \
+        -v /:/rootfs:ro \
+        --pid host \
+        prom/node-exporter \
+        --path.procfs=/host/proc \
+        --path.rootfs=/rootfs \
+        --path.sysfs=/host/sys \
+        --collector.filesystem.mount-points-exclude="^/(sys|proc|dev|host|etc)($$|/)"
+
+    # Wait for Node Exporter to be ready
+    sleep 5
+
+    # Verify Node Exporter is running
+    if ! docker ps | grep -q node-exporter; then
+        error "Node Exporter failed to start"
+        exit 1
+    fi
+
+    success "✅ Node Exporter system monitoring setup completed"
+}
+
+# ============================================================================
+# PHASE 26: CADVISOR - DOCKER CONTAINER MONITORING
+# ============================================================================
+
+setup_cadvisor() {
+    log "🐳 === PHASE 26: cAdvisor Container Monitoring Setup ==="
+
+    # Start cAdvisor container
+    log "Starting cAdvisor for Docker container monitoring..."
+    docker run -d \
+        --name cadvisor \
+        --network host \
+        -v /:/rootfs:ro \
+        -v /var/run:/var/run:ro \
+        -v /sys:/sys:ro \
+        -v /var/lib/docker/:/var/lib/docker:ro \
+        -v /dev/disk/:/dev/disk:ro \
+        --privileged \
+        --device /dev/kmsg \
+        gcr.io/cadvisor/cadvisor:v0.47.0
+
+    # Wait for cAdvisor to be ready
+    sleep 10
+
+    # Verify cAdvisor is running
+    if ! docker ps | grep -q cadvisor; then
+        error "cAdvisor failed to start"
+        exit 1
+    fi
+
+    success "✅ cAdvisor container monitoring setup completed"
+}
+
+# ============================================================================
 # PHASE 6: SELF-HOSTED API ENDPOINTS - PURE SELF-HOSTING ARCHITECTURE
 # ============================================================================
 
@@ -1247,6 +1513,8 @@ Architecture: World-Class Web Hosting Stack (Supabase + Monitoring)
 ✅ Grafana Dashboards & Visualization
 ✅ pgAdmin Database Management
 ✅ Uptime Kuma Status Monitoring
+✅ Loki Log Aggregation
+✅ Promtail Log Shipping
 ✅ Automated Backups (Daily)
 ✅ Monitoring Scripts
 
@@ -1256,7 +1524,7 @@ Architecture: World-Class Web Hosting Stack (Supabase + Monitoring)
 - Supabase Auth API: https://$DOMAIN/auth/v1/
 - Supabase Realtime: https://$DOMAIN/realtime/v1/
 - Supabase Storage: https://$DOMAIN/storage/v1/
-- Grafana: https://$DOMAIN:3000 (monitoring)
+- Grafana: https://$DOMAIN:3000 (monitoring & logs)
 - pgAdmin: https://$DOMAIN:5050 (database admin)
 - Uptime Kuma: https://$DOMAIN:3001 (status monitoring)
 - MinIO Console: http://localhost:9001
@@ -1774,6 +2042,12 @@ main() {
     # Management & Monitoring
     [[ "$ENABLE_PGADMIN" == "true" ]] && setup_pgadmin
     [[ "$ENABLE_UPTIME_KUMA" == "true" ]] && setup_uptime_kuma
+
+    # Logging & Observability
+    [[ "$ENABLE_LOKI" == "true" ]] && setup_loki
+    [[ "$ENABLE_PROMTAIL" == "true" ]] && setup_promtail
+    [[ "$ENABLE_NODE_EXPORTER" == "true" ]] && setup_node_exporter
+    [[ "$ENABLE_CADVISOR" == "true" ]] && setup_cadvisor
 
     # Always run backups and monitoring, then finalize
     setup_backups_and_monitoring
