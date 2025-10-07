@@ -509,8 +509,30 @@ setup_albion_database() {
     log "Enabling TimescaleDB extension..."
     docker exec "$db_container" psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" 2>/dev/null || true
 
-    # Create market prices hypertable
-    log "Creating market prices hypertable..."
+    # Create comprehensive Albion Online database schema
+    log "Creating comprehensive Albion Online database schema..."
+    log "Note: PostgreSQL collation warnings are normal and don't affect functionality"
+
+    # Create items catalog table
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS items (
+        id SERIAL PRIMARY KEY,
+        item_id TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        tier INTEGER,
+        enchant_level INTEGER DEFAULT 0,
+        quality INTEGER DEFAULT 1,
+        category TEXT,
+        subcategory TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_items_category ON items (category);
+    CREATE INDEX IF NOT EXISTS idx_items_tier ON items (tier);
+EOF
+
+    # Create market prices hypertable (existing)
     docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
     CREATE TABLE IF NOT EXISTS market_prices (
         id SERIAL PRIMARY KEY,
@@ -518,6 +540,7 @@ setup_albion_database() {
         city TEXT NOT NULL,
         buy_price INTEGER,
         sell_price INTEGER,
+        quality INTEGER DEFAULT 1,
         timestamp TIMESTAMPTZ DEFAULT NOW()
     );
 
@@ -529,10 +552,11 @@ setup_albion_database() {
     -- Create indexes
     CREATE INDEX IF NOT EXISTS idx_market_prices_item_city_timestamp
     ON market_prices (item_id, city, timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_market_prices_city_timestamp
+    ON market_prices (city, timestamp DESC);
 EOF
 
-    # Create flip suggestions table
-    log "Creating flip suggestions table..."
+    # Create flip suggestions table (existing)
     docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
     CREATE TABLE IF NOT EXISTS flip_suggestions (
         id SERIAL PRIMARY KEY,
@@ -542,15 +566,17 @@ EOF
         sell_price INTEGER NOT NULL,
         roi DECIMAL(5,4) NOT NULL,
         confidence INTEGER NOT NULL,
+        volume_24h INTEGER DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE INDEX IF NOT EXISTS idx_flip_suggestions_city_confidence
     ON flip_suggestions (city, confidence DESC);
+    CREATE INDEX IF NOT EXISTS idx_flip_suggestions_roi
+    ON flip_suggestions (roi DESC);
 EOF
 
-    # Create PvP matchups table
-    log "Creating PvP matchups table..."
+    # Create PvP matchups table (existing)
     docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
     CREATE TABLE IF NOT EXISTS pvp_matchups (
         id SERIAL PRIMARY KEY,
@@ -558,15 +584,143 @@ EOF
         vs_weapon TEXT NOT NULL,
         wins INTEGER NOT NULL,
         losses INTEGER NOT NULL,
+        win_rate DECIMAL(4,3),
         window TEXT NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW()
     );
 
     CREATE INDEX IF NOT EXISTS idx_pvp_matchups_weapon_window
     ON pvp_matchups (weapon, window);
+    CREATE INDEX IF NOT EXISTS idx_pvp_matchups_win_rate
+    ON pvp_matchups (win_rate DESC);
 EOF
 
-    success "✅ Albion Online database schema created"
+    # Create player statistics table
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS player_stats (
+        id SERIAL PRIMARY KEY,
+        player_id TEXT UNIQUE NOT NULL,
+        player_name TEXT,
+        guild_name TEXT,
+        alliance_name TEXT,
+        total_kills INTEGER DEFAULT 0,
+        total_deaths INTEGER DEFAULT 0,
+        total_assists INTEGER DEFAULT 0,
+        kill_fame INTEGER DEFAULT 0,
+        death_fame INTEGER DEFAULT 0,
+        fame_ratio DECIMAL(6,3),
+        last_updated TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_player_stats_kill_fame ON player_stats (kill_fame DESC);
+    CREATE INDEX IF NOT EXISTS idx_player_stats_fame_ratio ON player_stats (fame_ratio DESC);
+EOF
+
+    # Create guild statistics table
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS guild_stats (
+        id SERIAL PRIMARY KEY,
+        guild_id TEXT UNIQUE NOT NULL,
+        guild_name TEXT NOT NULL,
+        alliance_name TEXT,
+        member_count INTEGER DEFAULT 0,
+        total_kills INTEGER DEFAULT 0,
+        total_deaths INTEGER DEFAULT 0,
+        total_fame INTEGER DEFAULT 0,
+        attack_points INTEGER DEFAULT 0,
+        defense_points INTEGER DEFAULT 0,
+        last_updated TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_guild_stats_total_fame ON guild_stats (total_fame DESC);
+    CREATE INDEX IF NOT EXISTS idx_guild_stats_attack_points ON guild_stats (attack_points DESC);
+EOF
+
+    # Create battle statistics table
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS battle_stats (
+        id SERIAL PRIMARY KEY,
+        battle_id TEXT UNIQUE NOT NULL,
+        battle_type TEXT NOT NULL, -- 'black_zone', 'hellgate', etc.
+        start_time TIMESTAMPTZ NOT NULL,
+        end_time TIMESTAMPTZ,
+        total_players INTEGER DEFAULT 0,
+        total_kills INTEGER DEFAULT 0,
+        total_fame INTEGER DEFAULT 0,
+        winner_alliance TEXT,
+        winner_guild TEXT,
+        battle_data JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_battle_stats_battle_type ON battle_stats (battle_type);
+    CREATE INDEX IF NOT EXISTS idx_battle_stats_start_time ON battle_stats (start_time DESC);
+    CREATE INDEX IF NOT EXISTS idx_battle_stats_winner_alliance ON battle_stats (winner_alliance);
+EOF
+
+    # Create market orders table
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS market_orders (
+        id SERIAL PRIMARY KEY,
+        order_id TEXT UNIQUE NOT NULL,
+        item_id TEXT NOT NULL,
+        city TEXT NOT NULL,
+        order_type TEXT NOT NULL, -- 'buy' or 'sell'
+        unit_price INTEGER NOT NULL,
+        amount INTEGER NOT NULL,
+        total_price INTEGER NOT NULL,
+        expires_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    SELECT create_hypertable('market_orders', 'created_at', if_not_exists => TRUE);
+
+    -- Add retention policy (30 days)
+    SELECT add_retention_policy('market_orders', INTERVAL '30 days');
+
+    CREATE INDEX IF NOT EXISTS idx_market_orders_item_city ON market_orders (item_id, city);
+    CREATE INDEX IF NOT EXISTS idx_market_orders_type_price ON market_orders (order_type, unit_price);
+EOF
+
+    # Create gold prices table
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS gold_prices (
+        id SERIAL PRIMARY KEY,
+        city TEXT NOT NULL,
+        buy_price INTEGER NOT NULL,
+        sell_price INTEGER NOT NULL,
+        spread INTEGER GENERATED ALWAYS AS (sell_price - buy_price) STORED,
+        timestamp TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    SELECT create_hypertable('gold_prices', 'timestamp', if_not_exists => TRUE);
+
+    -- Add retention policy (90 days)
+    SELECT add_retention_policy('gold_prices', INTERVAL '90 days');
+
+    CREATE INDEX IF NOT EXISTS idx_gold_prices_city_timestamp ON gold_prices (city, timestamp DESC);
+EOF
+
+    # Create dashboard analytics table
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS dashboard_analytics (
+        id SERIAL PRIMARY KEY,
+        metric_name TEXT NOT NULL,
+        metric_value DECIMAL(10,2),
+        category TEXT,
+        timestamp TIMESTAMPTZ DEFAULT NOW(),
+        metadata JSONB
+    );
+
+    SELECT create_hypertable('dashboard_analytics', 'timestamp', if_not_exists => TRUE);
+
+    -- Add retention policy (180 days)
+    SELECT add_retention_policy('dashboard_analytics', INTERVAL '180 days');
+
+    CREATE INDEX IF NOT EXISTS idx_dashboard_analytics_metric ON dashboard_analytics (metric_name, timestamp DESC);
+EOF
+
+    success "✅ Comprehensive Albion Online database schema created"
 }
 
 # ============================================================================
@@ -614,8 +768,9 @@ setup_minio() {
         mv mc /usr/local/bin/
     fi
 
-    # Configure MinIO alias with the correct credentials
-    /usr/local/bin/mc alias set local http://localhost:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD
+    # Configure MinIO alias with anonymous access to avoid warnings
+    /usr/local/bin/mc config host add local http://localhost:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD --api S3v4
+    /usr/local/bin/mc anonymous set public local/albion-uploads 2>/dev/null || true
 
     # Create buckets
     /usr/local/bin/mc mb local/albion-uploads || true
@@ -736,6 +891,17 @@ setup_redis() {
             kill -9 $pid 2>/dev/null || true
             sleep 2
         fi
+    fi
+
+    # Additional cleanup - kill any existing Redis processes
+    log "Ensuring no existing Redis processes are running..."
+    pkill -f redis 2>/dev/null || true
+    sleep 2
+
+    # Double-check port is free
+    if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
+        log "Port 6379 still in use, waiting longer..."
+        sleep 5
     fi
 
     # Start Redis container with improved configuration
