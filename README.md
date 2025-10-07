@@ -1,11 +1,6 @@
-# Albion Online Omni-Dashboard
+# Albion Online Ultimate Resource Hub 🏰
 
-> The ultimate **100% free** platform for real-time market intelligence, trading tools, and community insights for Albion Online.
-
-[![Next.js](https://img.shields.io/badge/Next.js-15.0.5-black)](https://nextjs.org/)
-[![React](https://img.shields.io/badge/React-19.0.0-blue)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue)](https://www.typescriptlang.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+A comprehensive, enterprise-grade dashboard for Albion Online players featuring real-time market analysis, PvP tracking, guild management, and advanced trading tools.
 
 ## 🚀 Features
 

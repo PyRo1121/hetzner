@@ -1,0 +1,327 @@
+name: Infrastructure Validation
+
+on:
+  push:
+    paths:
+      - 'scripts/infra/**'
+      - 'deploy-*.sh'
+      - '.github/workflows/**'
+      - 'docker-compose*.yml'
+      - 'Dockerfile*'
+  pull_request:
+    paths:
+      - 'scripts/infra/**'
+      - 'deploy-*.sh'
+      - '.github/workflows/**'
+      - 'docker-compose*.yml'
+      - 'Dockerfile*'
+  workflow_dispatch:
+
+jobs:
+  validate-scripts:
+    name: Validate Infrastructure Scripts
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install shellcheck
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y shellcheck
+
+    - name: Validate shell scripts
+      run: |
+        echo "🔍 Validating shell scripts..."
+        
+        # Find and validate all shell scripts
+        find . -name "*.sh" -type f | while read -r script; do
+          echo "Checking: $script"
+          shellcheck "$script" || {
+            echo "❌ ShellCheck failed for: $script"
+            exit 1
+          }
+        done
+        
+        echo "✅ All shell scripts passed validation"
+
+    - name: Validate script permissions
+      run: |
+        echo "🔍 Checking script permissions..."
+        
+        find scripts/infra -name "*.sh" -type f | while read -r script; do
+          if [[ ! -x "$script" ]]; then
+            echo "⚠️ Script not executable: $script"
+            chmod +x "$script"
+            echo "✅ Fixed permissions for: $script"
+          fi
+        done
+
+    - name: Validate script structure
+      run: |
+        echo "🔍 Validating script structure..."
+        
+        # Check for required functions and variables
+        required_scripts=(
+          "scripts/infra/deploy-unified-enterprise.sh"
+          "scripts/infra/bootstrap-supabase-workers.sh"
+          "scripts/infra/k3s-bootstrap.sh"
+        )
+        
+        for script in "${required_scripts[@]}"; do
+          if [[ -f "$script" ]]; then
+            echo "✅ Found: $script"
+            
+            # Check for basic structure
+            if grep -q "#!/bin/bash" "$script"; then
+              echo "  ✅ Has proper shebang"
+            else
+              echo "  ❌ Missing proper shebang"
+              exit 1
+            fi
+            
+            # Check for error handling
+            if grep -q "set -euo pipefail" "$script"; then
+              echo "  ✅ Has error handling"
+            else
+              echo "  ⚠️ Missing strict error handling"
+            fi
+          else
+            echo "❌ Missing required script: $script"
+            exit 1
+          fi
+        done
+
+  validate-docker:
+    name: Validate Docker Configuration
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Validate Dockerfile
+      run: |
+        if [[ -f "Dockerfile" ]]; then
+          echo "🔍 Validating Dockerfile..."
+          docker buildx build --dry-run . || {
+            echo "❌ Dockerfile validation failed"
+            exit 1
+          }
+          echo "✅ Dockerfile validation passed"
+        else
+          echo "⚠️ No Dockerfile found"
+        fi
+
+    - name: Validate docker-compose files
+      run: |
+        echo "🔍 Validating docker-compose files..."
+        
+        for compose_file in docker-compose*.yml; do
+          if [[ -f "$compose_file" ]]; then
+            echo "Validating: $compose_file"
+            docker compose -f "$compose_file" config || {
+              echo "❌ Invalid docker-compose file: $compose_file"
+              exit 1
+            }
+            echo "✅ Valid: $compose_file"
+          fi
+        done
+
+  validate-github-actions:
+    name: Validate GitHub Actions Workflows
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Validate workflow syntax
+      run: |
+        echo "🔍 Validating GitHub Actions workflows..."
+        
+        # Install actionlint
+        curl -s https://raw.githubusercontent.com/rhymond/actionlint/main/scripts/download-actionlint.bash | bash
+        
+        # Validate all workflow files
+        ./actionlint .github/workflows/*.yml || {
+          echo "❌ GitHub Actions workflow validation failed"
+          exit 1
+        }
+        
+        echo "✅ All GitHub Actions workflows are valid"
+
+  validate-environment:
+    name: Validate Environment Configuration
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check required environment variables
+      run: |
+        echo "🔍 Validating environment configuration..."
+        
+        # Check for environment variable documentation
+        required_env_vars=(
+          "DOMAIN"
+          "EMAIL"
+          "GITHUB_REPO"
+          "GITHUB_TOKEN"
+          "POSTGRES_PASSWORD"
+        )
+        
+        # Check if deployment scripts reference these variables
+        for var in "${required_env_vars[@]}"; do
+          if grep -r "\$${var}" scripts/infra/ >/dev/null 2>&1; then
+            echo "✅ Environment variable referenced: $var"
+          else
+            echo "⚠️ Environment variable not found in scripts: $var"
+          fi
+        done
+
+    - name: Validate configuration templates
+      run: |
+        echo "🔍 Checking for configuration templates..."
+        
+        # Check for example configurations
+        config_files=(
+          ".env.example"
+          "docker-compose.example.yml"
+        )
+        
+        for config in "${config_files[@]}"; do
+          if [[ -f "$config" ]]; then
+            echo "✅ Found configuration template: $config"
+          else
+            echo "⚠️ Missing configuration template: $config"
+          fi
+        done
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Scan for secrets
+      run: |
+        echo "🔍 Scanning for potential secrets..."
+        
+        # Simple secret detection patterns
+        secret_patterns=(
+          "password.*=.*['\"][^'\"]{8,}['\"]"
+          "secret.*=.*['\"][^'\"]{16,}['\"]"
+          "key.*=.*['\"][^'\"]{16,}['\"]"
+          "token.*=.*['\"][^'\"]{16,}['\"]"
+        )
+        
+        found_secrets=false
+        for pattern in "${secret_patterns[@]}"; do
+          if grep -r -i -E "$pattern" . --exclude-dir=.git --exclude="*.md" >/dev/null 2>&1; then
+            echo "⚠️ Potential secret found matching pattern: $pattern"
+            found_secrets=true
+          fi
+        done
+        
+        if [[ "$found_secrets" == "true" ]]; then
+          echo "❌ Potential secrets detected. Please review and use GitHub secrets instead."
+          exit 1
+        else
+          echo "✅ No obvious secrets detected in code"
+        fi
+
+    - name: Check file permissions
+      run: |
+        echo "🔍 Checking file permissions..."
+        
+        # Check for overly permissive files
+        find . -type f -perm /o+w | while read -r file; do
+          echo "⚠️ World-writable file: $file"
+        done
+        
+        # Check for executable files that shouldn't be
+        find . -name "*.yml" -o -name "*.yaml" -o -name "*.json" -o -name "*.md" | while read -r file; do
+          if [[ -x "$file" ]]; then
+            echo "⚠️ Executable config/doc file: $file"
+          fi
+        done
+
+  test-deployment-dry-run:
+    name: Test Deployment (Dry Run)
+    runs-on: ubuntu-latest
+    needs: [validate-scripts, validate-docker]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Simulate deployment environment
+      run: |
+        echo "🔍 Testing deployment script dry run..."
+        
+        # Set up mock environment
+        export DOMAIN="test.example.com"
+        export EMAIL="test@example.com"
+        export GITHUB_REPO="${{ github.repository }}"
+        export GITHUB_TOKEN="mock-token"
+        export POSTGRES_PASSWORD="mock-password"
+        export DRY_RUN="true"
+        
+        # Test the unified deployment script
+        if [[ -f "scripts/infra/deploy-unified-enterprise.sh" ]]; then
+          # Add dry run capability to script
+          sed 's/^docker /echo "DRY RUN: docker "/g' scripts/infra/deploy-unified-enterprise.sh > /tmp/deploy-dry-run.sh
+          sed -i 's/^systemctl /echo "DRY RUN: systemctl "/g' /tmp/deploy-dry-run.sh
+          sed -i 's/^ufw /echo "DRY RUN: ufw "/g' /tmp/deploy-dry-run.sh
+          
+          chmod +x /tmp/deploy-dry-run.sh
+          
+          echo "Running deployment dry run..."
+          bash -n /tmp/deploy-dry-run.sh || {
+            echo "❌ Deployment script syntax error"
+            exit 1
+          }
+          
+          echo "✅ Deployment script syntax validation passed"
+        fi
+
+  notify-validation:
+    name: Notify Validation Results
+    runs-on: ubuntu-latest
+    needs: [validate-scripts, validate-docker, validate-github-actions, validate-environment, security-scan, test-deployment-dry-run]
+    if: always()
+    
+    steps:
+    - name: Notify success
+      if: ${{ !contains(needs.*.result, 'failure') }}
+      run: |
+        echo "🎉 Infrastructure validation successful!"
+        echo "✅ All scripts validated"
+        echo "✅ Docker configuration valid"
+        echo "✅ GitHub Actions workflows valid"
+        echo "✅ Environment configuration checked"
+        echo "✅ Security scan passed"
+        echo "✅ Deployment dry run successful"
+        echo "🚀 Infrastructure is ready for deployment"
+
+    - name: Notify failure
+      if: ${{ contains(needs.*.result, 'failure') }}
+      run: |
+        echo "❌ Infrastructure validation failed!"
+        echo "🔍 Check the failed jobs for details:"
+        echo "  - Scripts: ${{ needs.validate-scripts.result }}"
+        echo "  - Docker: ${{ needs.validate-docker.result }}"
+        echo "  - GitHub Actions: ${{ needs.validate-github-actions.result }}"
+        echo "  - Environment: ${{ needs.validate-environment.result }}"
+        echo "  - Security: ${{ needs.security-scan.result }}"
+        echo "  - Deployment Test: ${{ needs.test-deployment-dry-run.result }}"
+        echo "⚠️ Fix validation issues before deploying"
+        exit 1

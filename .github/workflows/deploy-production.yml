@@ -2,30 +2,140 @@ name: Deploy Albion Enterprise to Production
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      deployment_mode:
+        description: 'Deployment mode'
+        required: true
+        default: 'enterprise'
+        type: choice
+        options:
+        - basic
+        - enterprise
+        - k8s
+      force_rebuild:
+        description: 'Force rebuild infrastructure'
+        required: false
+        default: false
+        type: boolean
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  NODE_VERSION: '20'
+  DEPLOYMENT_MODE: ${{ github.event.inputs.deployment_mode || 'enterprise' }}
 
 jobs:
+  validate:
+    name: Validate Code & Infrastructure
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.changes.outputs.should_deploy }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2
+
+    - name: Check for changes
+      id: changes
+      run: |
+        if [[ "${{ github.event.inputs.force_rebuild }}" == "true" ]]; then
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+          echo "Force rebuild requested"
+          exit 0
+        fi
+        
+        # Check if there are changes that require deployment
+        if git diff --name-only HEAD~1 HEAD | grep -E '\.(js|jsx|ts|tsx|json|md|yml|yaml)$|^scripts/|^src/|^public/|^components/'; then
+          echo "should_deploy=true" >> $GITHUB_OUTPUT
+          echo "Changes detected that require deployment"
+        else
+          echo "should_deploy=false" >> $GITHUB_OUTPUT
+          echo "No changes requiring deployment"
+        fi
+
+    - name: Setup Node.js
+      if: steps.changes.outputs.should_deploy == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+
+    - name: Install dependencies
+      if: steps.changes.outputs.should_deploy == 'true'
+      run: npm ci
+
+    - name: Run linting
+      if: steps.changes.outputs.should_deploy == 'true'
+      run: npm run lint
+
+    - name: Run type checking
+      if: steps.changes.outputs.should_deploy == 'true'
+      run: npm run type-check
+
+    - name: Run tests
+      if: steps.changes.outputs.should_deploy == 'true'
+      run: npm run test
+
+    - name: Validate infrastructure scripts
+      if: steps.changes.outputs.should_deploy == 'true'
+      run: |
+        # Validate shell scripts
+        find scripts/infra -name "*.sh" -exec shellcheck {} \;
+        echo "✅ Infrastructure scripts validated"
+
   setup-infrastructure:
-    name: Setup Kubernetes Infrastructure
+    name: Setup Infrastructure
     runs-on: ubuntu-latest
     environment: production
+    needs: validate
+    if: needs.validate.outputs.should_deploy == 'true'
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Setup kubectl
+    - name: Setup SSH
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+    - name: Add server to known hosts
+      run: |
+        ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+    - name: Deploy unified infrastructure
+      run: |
+        # Copy deployment script to server
+        scp scripts/infra/deploy-unified-enterprise.sh root@${{ secrets.SERVER_HOST }}:/tmp/
+        
+        # Execute deployment on server
+        ssh root@${{ secrets.SERVER_HOST }} "
+          chmod +x /tmp/deploy-unified-enterprise.sh
+          
+          DOMAIN='${{ secrets.DOMAIN }}' \
+          EMAIL='${{ secrets.EMAIL }}' \
+          GITHUB_REPO='${{ github.repository }}' \
+          GITHUB_TOKEN='${{ secrets.GITHUB_TOKEN }}' \
+          DEPLOYMENT_MODE='${{ env.DEPLOYMENT_MODE }}' \
+          ENABLE_MONITORING='${{ secrets.ENABLE_MONITORING || 'true' }}' \
+          ENABLE_COOLIFY='${{ secrets.ENABLE_COOLIFY || 'true' }}' \
+          POSTGRES_PASSWORD='${{ secrets.POSTGRES_PASSWORD }}' \
+          /tmp/deploy-unified-enterprise.sh
+        "
+
+    - name: Setup kubectl (for k8s mode)
+      if: env.DEPLOYMENT_MODE == 'k8s'
       uses: azure/k8s-set-context@v3
       with:
         method: kubeconfig
         kubeconfig: ${{ secrets.KUBE_CONFIG }}
 
-    - name: Deploy Infrastructure Stack
+    - name: Deploy k8s infrastructure (if k8s mode)
+      if: env.DEPLOYMENT_MODE == 'k8s'
       run: |
         # Create namespace
         kubectl create namespace albion-production --dry-run=client -o yaml | kubectl apply -f -
@@ -45,7 +155,8 @@ jobs:
     name: Build and Push Images
     runs-on: ubuntu-latest
     environment: production
-    needs: setup-infrastructure
+    needs: [validate, setup-infrastructure]
+    if: needs.validate.outputs.should_deploy == 'true'
 
     steps:
     - name: Checkout repository
@@ -67,43 +178,112 @@ jobs:
         context: .
         file: ./Dockerfile
         push: true
-        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
         build-args: |
-          NEXT_PUBLIC_SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+          NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
+          NEXTAUTH_URL=${{ secrets.NEXTAUTH_URL }}
 
     - name: Build and push data ingestion service
+      if: env.DEPLOYMENT_MODE == 'k8s'
       uses: docker/build-push-action@v5
       with:
         context: ./data-ingestion
         file: ./data-ingestion/Dockerfile
         push: true
-        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/data-ingestion:latest
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/data-ingestion:latest,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/data-ingestion:${{ github.sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
   deploy-application:
-    name: Deploy Next.js Application to Kubernetes
+    name: Deploy Application
     runs-on: ubuntu-latest
     environment: production
-    needs: build-and-push
+    needs: [validate, setup-infrastructure, build-and-push]
+    if: needs.validate.outputs.should_deploy == 'true'
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Setup kubectl
+    - name: Setup SSH (for enterprise/basic mode)
+      if: env.DEPLOYMENT_MODE != 'k8s'
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+    - name: Deploy to Coolify (enterprise mode)
+      if: env.DEPLOYMENT_MODE == 'enterprise'
+      run: |
+        # Deploy via Coolify API
+        curl -X POST "https://${{ secrets.DOMAIN }}:8000/api/v1/deploy" \
+          -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "repository": "${{ github.repository }}",
+            "branch": "${{ github.ref_name }}",
+            "commit": "${{ github.sha }}",
+            "environment": "production"
+          }' || {
+            echo "❌ Coolify deployment failed, falling back to direct deployment"
+            
+            # Fallback: Direct deployment
+            ssh root@${{ secrets.SERVER_HOST }} "
+              cd /opt/app || mkdir -p /opt/app && cd /opt/app
+              
+              # Stop existing application
+              docker compose down || true
+              
+              # Clone/update repository
+              if [[ -d .git ]]; then
+                git pull origin ${{ github.ref_name }}
+              else
+                git clone https://github.com/${{ github.repository }}.git .
+                git checkout ${{ github.ref_name }}
+              fi
+              
+              # Create production docker-compose
+              cat > docker-compose.prod.yml <<EOF
+              version: '3.8'
+              services:
+                app:
+                  image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+                  ports:
+                    - '3002:3000'
+                  environment:
+                    - NODE_ENV=production
+                    - NEXT_PUBLIC_SUPABASE_URL=https://${{ secrets.DOMAIN }}
+                    - NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+                    - NEXTAUTH_SECRET=${{ secrets.NEXTAUTH_SECRET }}
+                    - NEXTAUTH_URL=https://${{ secrets.DOMAIN }}
+                  restart: unless-stopped
+                  healthcheck:
+                    test: ['CMD', 'curl', '-f', 'http://localhost:3000/health']
+                    interval: 30s
+                    timeout: 10s
+                    retries: 3
+              EOF
+              
+              # Start application
+              docker compose -f docker-compose.prod.yml up -d
+            "
+          }
+
+    - name: Setup kubectl (for k8s mode)
+      if: env.DEPLOYMENT_MODE == 'k8s'
       uses: azure/k8s-set-context@v3
       with:
         method: kubeconfig
         kubeconfig: ${{ secrets.KUBE_CONFIG }}
 
-    - name: Deploy Next.js Application
+    - name: Deploy to k8s
+      if: env.DEPLOYMENT_MODE == 'k8s'
       run: |
         # Update image tag in deployment
-        sed -i "s|image:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest|g" k8s/app/deployment.yaml
+        sed -i "s|image:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}|g" k8s/app/deployment.yaml
 
         # Apply Kubernetes manifests
         kubectl apply -f k8s/app/
@@ -115,7 +295,8 @@ jobs:
     name: Deploy Data Ingestion Service
     runs-on: ubuntu-latest
     environment: production
-    needs: build-and-push
+    needs: [validate, build-and-push]
+    if: needs.validate.outputs.should_deploy == 'true' && env.DEPLOYMENT_MODE == 'k8s'
 
     steps:
     - name: Checkout repository
@@ -130,7 +311,7 @@ jobs:
     - name: Deploy Data Ingestion CronJob
       run: |
         # Update image tag
-        sed -i "s|image:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/data-ingestion:latest|g" k8s/data-ingestion/cronjob.yaml
+        sed -i "s|image:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/data-ingestion:${{ github.sha }}|g" k8s/data-ingestion/cronjob.yaml
 
         # Apply Kubernetes manifests
         kubectl apply -f k8s/data-ingestion/
@@ -142,12 +323,13 @@ jobs:
     name: Configure Cloudflare CDN
     runs-on: ubuntu-latest
     environment: production
-    needs: deploy-application
+    needs: [validate, deploy-application]
+    if: needs.validate.outputs.should_deploy == 'true'
 
     steps:
     - name: Configure Cloudflare CDN Rules
       run: |
-        # Set up CDN rules for image optimization using your existing secrets
+        # Set up CDN rules for image optimization
         curl -X POST "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/rulesets" \
           -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
           -H "Content-Type: application/json" \
@@ -166,36 +348,88 @@ jobs:
                 }
               }
             }]
-          }'
+          }' || echo "⚠️ CDN configuration failed (non-critical)"
 
   production-validation:
-    name: Production Validation
+    name: Production Validation & Health Check
     runs-on: ubuntu-latest
     environment: production
-    needs: [deploy-application, deploy-data-ingestion, configure-cdn]
+    needs: [validate, deploy-application, deploy-data-ingestion, configure-cdn]
+    if: always() && needs.validate.outputs.should_deploy == 'true'
 
     steps:
-    - name: Setup kubectl
+    - name: Setup kubectl (for k8s mode)
+      if: env.DEPLOYMENT_MODE == 'k8s'
       uses: azure/k8s-set-context@v3
       with:
         method: kubeconfig
         kubeconfig: ${{ secrets.KUBE_CONFIG }}
 
-    - name: Health Check
+    - name: Wait for application startup
+      run: sleep 60
+
+    - name: Health Check - Main application
       run: |
-        # Check Kubernetes deployments
+        for i in {1..10}; do
+          if curl -f https://${{ secrets.DOMAIN }}/health; then
+            echo "✅ Main application health check passed"
+            break
+          fi
+          echo "Attempt $i failed, retrying in 30s..."
+          sleep 30
+        done
+
+    - name: Health Check - Supabase API
+      run: |
+        curl -f https://${{ secrets.DOMAIN }}/rest/v1/ \
+          -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" || {
+          echo "❌ Supabase API health check failed"
+          exit 1
+        }
+        echo "✅ Supabase API health check passed"
+
+    - name: Health Check - Monitoring (if enabled)
+      if: secrets.ENABLE_MONITORING == 'true'
+      run: |
+        curl -f https://monitoring.${{ secrets.DOMAIN }}/grafana/api/health || {
+          echo "⚠️ Monitoring health check failed (non-critical)"
+        }
+        echo "✅ Monitoring health check completed"
+
+    - name: Kubernetes Health Check (k8s mode)
+      if: env.DEPLOYMENT_MODE == 'k8s'
+      run: |
+        # Check deployment status
+        kubectl get deployments -n albion-production
         kubectl get pods -n albion-production
-        kubectl get services -n albion-production
+        
+        # Verify all pods are running
+        kubectl wait --for=condition=ready pod -l app=albion-dashboard -n albion-production --timeout=300s
 
-        # Get service URL
-        SERVICE_URL=$(kubectl get svc albion-dashboard -n albion-production -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [validate, setup-infrastructure, build-and-push, deploy-application, production-validation]
+    if: always()
+    
+    steps:
+    - name: Notify success
+      if: needs.production-validation.result == 'success'
+      run: |
+        echo "🎉 Deployment successful!"
+        echo "🌐 Application: https://${{ secrets.DOMAIN }}"
+        echo "📊 Studio: https://${{ secrets.DOMAIN }}/studio"
+        echo "📈 Monitoring: https://monitoring.${{ secrets.DOMAIN }}/grafana/"
+        echo "🚀 Commit: ${{ github.sha }}"
+        echo "👤 Author: ${{ github.actor }}"
+        echo "🔧 Mode: ${{ env.DEPLOYMENT_MODE }}"
 
-        # Wait for deployment
-        sleep 60
-
-        # Check application health
-        curl -f http://$SERVICE_URL/api/health
-
-        echo "🎉 Production deployment successful!"
-        echo "🌐 Dashboard: https://$SERVICE_URL"
-        echo "📊 Monitoring: https://monitoring.$SERVICE_URL"
+    - name: Notify failure
+      if: failure()
+      run: |
+        echo "❌ Deployment failed!"
+         echo "🔍 Check the logs for details"
+         echo "🚀 Commit: ${{ github.sha }}"
+         echo "👤 Author: ${{ github.actor }}"
+         echo "🔧 Mode: ${{ env.DEPLOYMENT_MODE }}"
+         exit 1

@@ -629,7 +629,13 @@ EOF
     log "Setting up CPU-optimized data processing for VPS-3..."
 
     # Install Emscripten for WebAssembly compilation
-    git clone https://github.com/emscripten-core/emsdk.git /opt/emsdk
+    if [[ ! -d /opt/emsdk ]]; then
+        log "Cloning Emscripten SDK..."
+        retry_with_backoff 3 5 "git clone https://github.com/emscripten-core/emsdk.git /opt/emsdk"
+    else
+        log "Emscripten SDK already exists, skipping clone..."
+    fi
+
     cd /opt/emsdk
     ./emsdk install latest
     ./emsdk activate latest
