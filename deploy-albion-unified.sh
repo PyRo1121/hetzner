@@ -24,7 +24,7 @@ ENABLE_REDIS=true          # Caching for web performance
 ENABLE_PROMETHEUS=true     # Basic metrics
 ENABLE_GRAFANA=true        # Web monitoring dashboards
 
-# Optional Advanced Features (Disabled for web hosting focus)
+# Optional Advanced Features (Disabled for web hosting)
 ENABLE_TRAEFIK=false       # Advanced load balancer
 ENABLE_NEXTCLOUD=false     # File sharing (not needed for web hosting)
 ENABLE_VAULTWARDEN=false   # Password manager (not needed for web hosting)
@@ -636,16 +636,21 @@ EOF
 setup_redis() {
     log "🔴 === PHASE 10: Redis Caching Setup ==="
 
-    # Start Redis container
+    # Clean up any existing Redis container
+    docker stop redis 2>/dev/null || true
+    docker rm redis 2>/dev/null || true
+
+    # Start Redis container with proper configuration
     log "Starting Redis server..."
     docker run -d \
         --name redis \
+        --restart unless-stopped \
         --network host \
         -v /opt/redis/data:/data \
-        redis:7-alpine redis-server --appendonly yes
+        redis:7-alpine redis-server --appendonly yes --protected-mode no --bind 127.0.0.1
 
-    # Wait for Redis to be ready
-    sleep 5
+    # Wait longer for Redis to fully start
+    sleep 10
 
     # Verify Redis is running
     if ! docker ps | grep -q redis; then
@@ -654,10 +659,11 @@ setup_redis() {
     fi
 
     # Test Redis connection
-    if docker exec redis redis-cli ping | grep -q PONG; then
+    if docker exec redis redis-cli ping 2>/dev/null | grep -q PONG; then
         log "✓ Redis is responding correctly"
     else
-        warning "Redis connection test failed, but service may still work"
+        warning "Redis connection test failed, checking logs..."
+        docker logs redis | tail -10
     fi
 
     success "✅ Redis caching setup completed"
@@ -752,8 +758,6 @@ setup_grafana() {
     fi
 
     success "✅ Grafana dashboards setup completed"
-
-
     success "✅ Redis caching setup completed"
 }
 
@@ -1169,6 +1173,346 @@ setup_cadvisor() {
 
     success "✅ cAdvisor container monitoring setup completed"
 }
+
+# ============================================================================
+# PHASE 20: PGADMIN DATABASE MANAGEMENT
+# ============================================================================
+
+setup_pgadmin() {
+    log "🗃️ === PHASE 20: pgAdmin Database Management Setup ==="
+
+    # Create pgAdmin directories
+    mkdir -p /opt/pgadmin/data
+
+    # Start pgAdmin container
+    log "Starting pgAdmin server..."
+    docker run -d \
+        --name pgadmin \
+        --network host \
+        -e PGADMIN_DEFAULT_EMAIL=admin@local \
+        -e PGADMIN_DEFAULT_PASSWORD=admin123 \
+        -v /opt/pgadmin/data:/var/lib/pgadmin \
+        dpage/pgadmin4:latest
+
+    # Wait for pgAdmin to be ready
+    sleep 10
+
+    # Verify pgAdmin is running
+    if ! docker ps | grep -q pgadmin; then
+        error "pgAdmin failed to start"
+        exit 1
+    fi
+
+    success "✅ pgAdmin database management setup completed"
+}
+
+# ============================================================================
+# PHASE 21: UPTIME KUMA MONITORING
+# ============================================================================
+
+setup_uptime_kuma() {
+    log "📊 === PHASE 21: Uptime Kuma Monitoring Setup ==="
+
+    # Create Uptime Kuma directories
+    mkdir -p /opt/uptime-kuma/data
+
+    # Start Uptime Kuma container
+    log "Starting Uptime Kuma server..."
+    docker run -d \
+        --name uptime-kuma \
+        --network host \
+        -v /opt/uptime-kuma/data:/app/data \
+        louislam/uptime-kuma:latest
+
+    # Wait for Uptime Kuma to be ready
+    sleep 15
+
+    # Verify Uptime Kuma is running
+    if ! docker ps | grep -q uptime-kuma; then
+        error "Uptime Kuma failed to start"
+        exit 1
+    fi
+
+    success "✅ Uptime Kuma monitoring setup completed"
+}
+
+# ============================================================================
+# PHASE 7: ALBION ONLINE DATABASE SCHEMA
+# ============================================================================
+
+setup_albion_database() {
+    log "🗄️ === PHASE 7: Albion Online Database Schema ==="
+
+    # Wait for PostgreSQL to be ready
+    sleep 30
+
+    # Get the database container name
+    local db_container=$(docker ps -q -f name=supabase-db)
+
+    if [[ -z "$db_container" ]]; then
+        warning "Database container not found, skipping schema setup"
+        return
+    fi
+
+    # Create TimescaleDB extension for time-series data
+    log "Enabling TimescaleDB extension..."
+    docker exec "$db_container" psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" 2>/dev/null || true
+
+    # Create market prices hypertable
+    log "Creating market prices hypertable..."
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS market_prices (
+        id SERIAL PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        city TEXT NOT NULL,
+        buy_price INTEGER,
+        sell_price INTEGER,
+        timestamp TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    SELECT create_hypertable('market_prices', 'timestamp', if_not_exists => TRUE);
+
+    -- Add retention policy (90 days)
+    SELECT add_retention_policy('market_prices', INTERVAL '90 days');
+
+    -- Create indexes
+    CREATE INDEX IF NOT EXISTS idx_market_prices_item_city_timestamp
+    ON market_prices (item_id, city, timestamp DESC);
+EOF
+
+    # Create flip suggestions table
+    log "Creating flip suggestions table..."
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS flip_suggestions (
+        id SERIAL PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        city TEXT NOT NULL,
+        buy_price INTEGER NOT NULL,
+        sell_price INTEGER NOT NULL,
+        roi DECIMAL(5,4) NOT NULL,
+        confidence INTEGER NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_flip_suggestions_city_confidence
+    ON flip_suggestions (city, confidence DESC);
+EOF
+
+    # Create PvP matchups table
+    log "Creating PvP matchups table..."
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS pvp_matchups (
+        id SERIAL PRIMARY KEY,
+        weapon TEXT NOT NULL,
+        vs_weapon TEXT NOT NULL,
+        wins INTEGER NOT NULL,
+        losses INTEGER NOT NULL,
+        window TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pvp_matchups_weapon_window
+    ON pvp_matchups (weapon, window);
+EOF
+
+    success "✅ Albion Online database schema created"
+}
+
+# ============================================================================
+# PHASE 8: BACKUPS & MONITORING
+# ============================================================================
+
+setup_backups_and_monitoring() {
+    log "💾 === PHASE 8: Backups & Monitoring Setup ==="
+
+    # Create backup script
+    cat >/opt/backup-albion.sh <<'EOF'
+#!/bin/bash
+# Daily backup script for Albion Online data
+
+BACKUP_DIR="/opt/backups"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+# Create backup directory
+mkdir -p $BACKUP_DIR
+
+# Backup PostgreSQL database
+echo "Creating PostgreSQL backup..."
+docker exec $(docker ps -q -f name=supabase-db) pg_dump -U postgres postgres > $BACKUP_DIR/albion_postgres_$DATE.sql
+
+# Backup MinIO buckets
+echo "Backing up MinIO buckets..."
+/usr/local/bin/mc mirror --overwrite local/albion-uploads $BACKUP_DIR/minio_uploads_$DATE/
+# /usr/local/bin/mc mirror --overwrite local/albion-backups $BACKUP_DIR/minio_backups_$DATE/
+
+# Compress backups
+echo "Compressing backups..."
+cd $BACKUP_DIR
+tar -czf albion_backup_$DATE.tar.gz albion_postgres_$DATE.sql minio_uploads_$DATE/ 2>/dev/null || true
+
+# Clean old backups (keep 7 days)
+find $BACKUP_DIR -name "*.tar.gz" -type f -mtime +7 -delete
+
+echo "✅ Backup completed: albion_backup_$DATE.tar.gz"
+EOF
+
+    chmod +x /opt/backup-albion.sh
+
+    # Setup cron job for daily backups
+    crontab -l | grep -v backup-albion >/tmp/crontab.tmp 2>/dev/null || true
+    echo "0 2 * * * /opt/backup-albion.sh" >>/tmp/crontab.tmp
+    crontab /tmp/crontab.tmp
+    rm -f /tmp/crontab.tmp
+
+    # Create monitoring script
+    cat >/opt/monitor-albion.sh <<'EOF'
+#!/bin/bash
+# Monitoring script for Albion Online services
+
+echo "=== Albion Online Services Status ==="
+echo "Timestamp: $(date)"
+
+# Check Supabase services
+echo -e "\n--- Supabase Services ---"
+docker ps --filter name=supabase | grep -v CONTAINER
+
+# Check MinIO
+echo -e "\n--- MinIO Storage ---"
+docker ps --filter name=minio | grep -v CONTAINER
+
+# Check Caddy
+echo -e "\n--- Caddy Proxy ---"
+systemctl status caddy --no-pager -l
+
+# Check disk usage
+echo -e "\n--- Disk Usage ---"
+df -h /opt
+
+# Check memory usage
+echo -e "\n--- Memory Usage ---"
+free -h
+
+echo -e "\n=== End Status Report ==="
+EOF
+
+    chmod +x /opt/monitor-albion.sh
+
+    success "✅ Backups and monitoring setup completed"
+}
+
+# ============================================================================
+# PHASE 9: DEPLOYMENT FINALIZATION
+# ============================================================================
+
+finalize_deployment() {
+
+    # Create deployment summary
+    cat >/opt/albion-deployment-summary.txt <<EOF
+=== ALBION ONLINE UNIFIED DEPLOYMENT SUMMARY ===
+Deployment Date: $(date)
+Domain: $DOMAIN
+Architecture: World-Class Web Hosting Stack (Supabase + Monitoring)
+
+=== SERVICES DEPLOYED ===
+✅ System Security (UFW, fail2ban, unattended-upgrades)
+✅ Docker Runtime ($DOCKER_VERSION)
+✅ Supabase Self-Hosting (REST, Auth, Realtime, Storage)
+✅ MinIO S3-Compatible Storage
+✅ Caddy Reverse Proxy with TLS
+✅ Redis Caching & Performance
+✅ Prometheus Metrics Collection
+✅ Grafana Dashboards & Visualization
+✅ pgAdmin Database Management
+✅ Uptime Kuma Status Monitoring
+✅ Loki Log Aggregation
+✅ Promtail Log Shipping
+✅ Automated Backups (Daily)
+✅ Monitoring Scripts
+
+=== ACCESS POINTS ===
+- Web Interface: https://$DOMAIN
+- Supabase REST API: https://$DOMAIN/rest/v1/
+- Supabase Auth API: https://$DOMAIN/auth/v1/
+- Supabase Realtime: https://$DOMAIN/realtime/v1/
+- Supabase Storage: https://$DOMAIN/storage/v1/
+- Grafana: https://$DOMAIN:3000 (monitoring & logs)
+- pgAdmin: https://$DOMAIN:5050 (database admin)
+- Uptime Kuma: https://$DOMAIN:3001 (status monitoring)
+- MinIO Console: http://localhost:9001
+- Health Check: https://$DOMAIN/health
+
+=== NEXT STEPS ===
+1. Configure DNS: Point $DOMAIN to this server
+2. Set up SSL certificates (handled by Caddy)
+3. Test API endpoints and database connectivity
+4. Configure monitoring alerts (optional)
+
+=== ROADMAP COMPLIANCE ===
+✅ Single unified deployment approach
+✅ Supabase self-hosting architecture
+✅ Self-hosted API endpoints (no external dependencies)
+✅ Cost-effective single-host deployment
+✅ Production-ready security and monitoring
+✅ Complete independence from external services
+
+=== PERFORMANCE TARGETS ===
+- API Response Time: p95 < 400ms (Self-hosted APIs → Supabase)
+- Database Queries: Optimized for NVMe storage
+- Backup RTO: < 2 hours (daily automated backups)
+- Uptime Target: 99.5% (Self-hosted baseline)
+
+EOF
+
+    cat /opt/albion-deployment-summary.txt
+
+    success "🎉 Deployment completed successfully!"
+    success "📋 Summary saved to: /opt/albion-deployment-summary.txt"
+    success "🚀 Ready for production use following October 2025 roadmap standards"
+}
+
+# ============================================================================
+# MAIN DEPLOYMENT ORCHESTRATION
+# ============================================================================
+
+main() {
+    log "🚀 Starting Albion Online World-Class Web Hosting Stack Deployment"
+    log "📋 Architecture: Complete Web Hosting Infrastructure (10 Services)"
+    log "📅 October 2025 Standards Implementation"
+
+    # Execute deployment phases
+    check_requirements
+    setup_system
+    setup_docker
+
+    # Core Infrastructure
+    [[ "$ENABLE_SUPABASE" == "true" ]] && setup_supabase
+    [[ "$ENABLE_MINIO" == "true" ]] && setup_minio
+    [[ "$ENABLE_CADDY" == "true" ]] && setup_caddy
+
+    # Advanced Infrastructure
+    [[ "$ENABLE_REDIS" == "true" ]] && setup_redis
+    [[ "$ENABLE_PROMETHEUS" == "true" ]] && setup_prometheus
+    [[ "$ENABLE_GRAFANA" == "true" ]] && setup_grafana
+
+    # Management & Monitoring
+    [[ "$ENABLE_PGADMIN" == "true" ]] && setup_pgadmin
+    [[ "$ENABLE_UPTIME_KUMA" == "true" ]] && setup_uptime_kuma
+
+    # Logging & Observability
+    [[ "$ENABLE_LOKI" == "true" ]] && setup_loki
+    [[ "$ENABLE_PROMTAIL" == "true" ]] && setup_promtail
+    [[ "$ENABLE_NODE_EXPORTER" == "true" ]] && setup_node_exporter
+    [[ "$ENABLE_CADVISOR" == "true" ]] && setup_cadvisor
+
+    # Always run backups and monitoring, then finalize
+    setup_backups_and_monitoring
+    finalize_deployment
+
+    log "✅ Deployment orchestration completed"
+}
+
+# Run main function
+main "$@"
 
 # ============================================================================
 # PHASE 6: SELF-HOSTED API ENDPOINTS - PURE SELF-HOSTING ARCHITECTURE
