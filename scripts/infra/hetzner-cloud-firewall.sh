@@ -24,7 +24,7 @@ err() { echo "[hcloud-fw:ERROR] $*" >&2; }
 # Prefer /usr/local/bin over system paths (sudo may prioritize /usr/bin)
 export PATH="/usr/local/bin:$PATH"
 
-# Minimum hcloud CLI version required for --rules-from support
+# hcloud CLI version for basic operations (list, describe, apply)
 HC_VER="v1.53.0"
 HCLOUD_API="https://api.hetzner.cloud/v1"
 
@@ -68,14 +68,10 @@ ensure_jq() {
 install_hcloud_cli() {
   local need_install="true"
   if command -v hcloud >/dev/null 2>&1; then
-    if hcloud firewall create --help 2>&1 | grep -q -- "--rules-from"; then
-      log "hcloud CLI present (supports --rules-from)"
-      need_install="false"
-    else
-      log "hcloud CLI present but missing --rules-from; installing ${HC_VER}"
-    fi
+    log "hcloud CLI present"
+    need_install="false"
   else
-    log "Installing hcloud CLI"
+    log "Installing hcloud CLI ${HC_VER}"
   fi
   if [[ "$need_install" != "true" ]]; then
     return
@@ -104,14 +100,10 @@ install_hcloud_cli() {
   rm -rf "$TMP"
   # Ensure new binary is picked up
   hash -r
-  # Re-validate CLI support post-install
-  if ! hcloud firewall create --help 2>&1 | grep -q -- "--rules-from"; then
-    err "Installed CLI still lacks --rules-from support"; exit 1
-  fi
-  log "hcloud CLI now supports --rules-from"
+  log "hcloud CLI installed successfully"
 }
 
-# ---- REST API helpers (fallback for legacy CLI) ----
+# ---- REST API helpers (primary method for rules) ----
 api_get_firewall_id_by_name() {
   local name="$1"
   curl -sS -H "Authorization: Bearer $HCLOUD_TOKEN" "$HCLOUD_API/firewalls?per_page=50" \
@@ -127,41 +119,58 @@ api_create_firewall() {
     rules: $rules,
     apply_to: [ { server: { id: ($sid|tonumber) } } ]
   }')
-  response=$(curl -sS -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
+  response=$(curl -sS -w "%{http_code}" -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
     -d "$body" "$HCLOUD_API/firewalls")
-  if [[ $? -ne 0 ]]; then err "Curl failed during firewall creation"; exit 1; fi
-  fw_id=$(echo "$response" | jq -r '.firewall.id // empty')
+  http_code="${response: -3}"
+  response_body="${response%???}"
+  if [[ "$http_code" != "201" ]]; then
+    log "API create response (HTTP $http_code): $response_body"
+    err "Failed to create firewall: HTTP $http_code (check token has Read & Write permissions for firewalls)"; exit 1
+  fi
+  fw_id=$(echo "$response_body" | jq -r '.firewall.id // empty')
   if [[ -z "$fw_id" ]]; then
-    log "API create response: $response"
-    err "Failed to create firewall: invalid response (check token permissions)"; exit 1
+    log "API create response body: $response_body"
+    err "Failed to extract firewall ID from response"; exit 1
   fi
   echo "$fw_id"
 }
 
 api_set_firewall_rules() {
   local fw_id="$1"; local rules_json_array="$2"
-  local body response
+  local body response http_code response_body
   body=$(jq -n --argjson rules $rules_json_array '{ rules: $rules }')
-  response=$(curl -sS -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
+  response=$(curl -sS -w "%{http_code}" -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
     -d "$body" "$HCLOUD_API/firewalls/$fw_id/actions/set_rules")
-  if [[ $? -ne 0 ]]; then err "Curl failed during set rules"; exit 1; fi
-  if [[ "$(echo "$response" | jq -r '.action.id // empty')" == "empty" ]]; then
-    log "API set rules response: $response"
-    err "Failed to set firewall rules: invalid response"; exit 1
+  http_code="${response: -3}"
+  response_body="${response%???}"
+  if [[ "$http_code" != "202" ]]; then
+    log "API set rules response (HTTP $http_code): $response_body"
+    err "Failed to set firewall rules: HTTP $http_code"; exit 1
   fi
+  if [[ "$(echo "$response_body" | jq -r '.action.id // empty')" == "empty" ]]; then
+    log "API set rules response body: $response_body"
+    err "Failed to extract action ID from set rules response"; exit 1
+  fi
+  log "Rules set successfully (action ID: $(echo "$response_body" | jq -r '.action.id'))"
 }
 
 api_apply_firewall_to_server() {
   local fw_id="$1"; local server_id="$2"
-  local body response
+  local body response http_code response_body
   body=$(jq -n --arg sid "$server_id" '{ apply_to: [ { server: { id: ($sid|tonumber) } } ] }')
-  response=$(curl -sS -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
+  response=$(curl -sS -w "%{http_code}" -X POST -H "Authorization: Bearer $HCLOUD_TOKEN" -H "Content-Type: application/json" \
     -d "$body" "$HCLOUD_API/firewalls/$fw_id/actions/apply_to_resources")
-  if [[ $? -ne 0 ]]; then err "Curl failed during apply to server"; exit 1; fi
-  if [[ "$(echo "$response" | jq -r '.action.id // empty')" == "empty" ]]; then
-    log "API apply response: $response"
-    err "Failed to apply firewall to server: invalid response"; exit 1
+  http_code="${response: -3}"
+  response_body="${response%???}"
+  if [[ "$http_code" != "202" ]]; then
+    log "API apply response (HTTP $http_code): $response_body"
+    err "Failed to apply firewall to server: HTTP $http_code"; exit 1
   fi
+  if [[ "$(echo "$response_body" | jq -r '.action.id // empty')" == "empty" ]]; then
+    log "API apply response body: $response_body"
+    err "Failed to extract action ID from apply response"; exit 1
+  fi
+  log "Firewall applied successfully (action ID: $(echo "$response_body" | jq -r '.action.id'))"
 }
 
 main() {
@@ -207,48 +216,19 @@ main() {
     }
   ')
 
-  # Create or update firewall
-  FW_ID=$(hcloud firewall list -o columns=ID,NAME | awk -v name="$FIREWALL_NAME" '$2==name {print $1}')
-  if hcloud firewall create --help 2>&1 | grep -q -- "--rules-from"; then
-    if [[ -z "$FW_ID" ]]; then
-      log "Creating new firewall: $FIREWALL_NAME"
-      FW_ID=$(echo "$RULES" | hcloud firewall create --name "$FIREWALL_NAME" --rules-from - -o columns=ID | tail -n1)
-    else
-      log "Updating firewall: $FIREWALL_NAME"
-      # Prefer set-rules if available; fallback to update
-      if hcloud firewall set-rules --help >/dev/null 2>&1; then
-        echo "$RULES" | hcloud firewall set-rules "$FW_ID" --rules-from - >/dev/null
-      else
-        echo "$RULES" | hcloud firewall update "$FW_ID" --rules-from - >/dev/null
-      fi
-    fi
+  # Use REST API for create/update/apply (reliable for multiple rules)
+  log "Using Hetzner Cloud REST API for firewall management."
+  RULES_ARRAY=$(echo "$RULES" | jq -c '.rules')
+  # Find firewall by name via API
+  FW_ID=$(api_get_firewall_id_by_name "$FIREWALL_NAME" || true)
+  if [[ -z "${FW_ID:-}" ]]; then
+    log "Creating new firewall via API: $FIREWALL_NAME"
+    FW_ID=$(api_create_firewall "$FIREWALL_NAME" "$RULES_ARRAY" "$SERVER_ID")
   else
-    # Legacy CLI fallback: use Hetzner Cloud REST API to set rules and attach
-    log "Legacy hcloud CLI detected (no --rules-from). Using REST API fallback."
-    RULES_ARRAY=$(echo "$RULES" | jq -c '.rules')
-    # Find firewall by name via API
-    FW_ID_API=$(api_get_firewall_id_by_name "$FIREWALL_NAME" || true)
-    if [[ -z "${FW_ID_API:-}" ]]; then
-      log "Creating new firewall via API: $FIREWALL_NAME"
-      FW_ID_API=$(api_create_firewall "$FIREWALL_NAME" "$RULES_ARRAY" "$SERVER_ID")
-      if [[ -z "${FW_ID_API:-}" ]]; then
-        err "API create failed: could not obtain firewall ID"; exit 1
-      fi
-    else
-      log "Updating firewall rules via API: $FIREWALL_NAME ($FW_ID_API)"
-      api_set_firewall_rules "$FW_ID_API" "$RULES_ARRAY"
-      log "Attaching firewall via API to server ($SERVER_ID)"
-      api_apply_firewall_to_server "$FW_ID_API" "$SERVER_ID"
-    fi
-    FW_ID=${FW_ID_API}
-  fi
-
-  log "Attaching firewall ($FW_ID) to server ($SERVER_ID)"
-  if hcloud firewall apply-to-resource --help >/dev/null 2>&1; then
-    hcloud firewall apply-to-resource "$FW_ID" --type server --server "$SERVER_ID" >/dev/null
-  else
-    # Already handled via API in legacy branch; no-op
-    :
+    log "Updating firewall rules via API: $FIREWALL_NAME ($FW_ID)"
+    api_set_firewall_rules "$FW_ID" "$RULES_ARRAY"
+    log "Re-attaching firewall via API to server ($SERVER_ID)"
+    api_apply_firewall_to_server "$FW_ID" "$SERVER_ID"
   fi
 
   log "Firewall configured and attached. Rules:"
