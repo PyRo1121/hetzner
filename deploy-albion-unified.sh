@@ -269,7 +269,30 @@ setup_supabase() {
         else
             error "Only $running_essential/4 essential services running"
             error "This might indicate insufficient resources or port conflicts"
-            error "Check: free -h, df -h, netstat -tlnp | grep :5432"
+
+            # Run diagnostics
+            log "Running deployment diagnostics..."
+            echo "=== SYSTEM RESOURCES ==="
+            free -h
+            echo ""
+            echo "=== DISK SPACE ==="
+            df -h
+            echo ""
+            echo "=== PORT 5432 CONFLICTS ==="
+            netstat -tlnp | grep :5432 || echo "Port 5432 is free"
+            echo ""
+            echo "=== DOCKER STATUS ==="
+            docker info 2>/dev/null | head -10
+            echo ""
+            echo "=== RECENT DOCKER LOGS ==="
+            docker logs $(docker ps -lq 2>/dev/null) 2>/dev/null | tail -10 || echo "No recent containers"
+
+            error "Deployment failed due to resource or configuration issues"
+            error "Please check the diagnostics above and ensure:"
+            error "1. At least 8GB RAM available (free -h)"
+            error "2. At least 20GB disk space available (df -h)"
+            error "3. Port 5432 is not already in use (netstat -tlnp | grep :5432)"
+            error "4. Docker is running properly (docker info)"
             exit 1
         fi
     else
