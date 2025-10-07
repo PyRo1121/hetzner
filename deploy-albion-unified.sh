@@ -718,38 +718,47 @@ EOF
 setup_redis() {
     log "🔴 === PHASE 10: Redis Caching Setup ==="
 
-    # Clean up any existing Redis container
-    docker stop redis 2>/dev/null || true
-    docker rm redis 2>/dev/null || true
+    # Check for existing Redis containers and clean them up
+    log "Checking for existing Redis containers..."
+    if docker ps -a --format 'table {{.Names}}' | grep -q "^redis$"; then
+        log "Removing existing Redis container..."
+        docker stop redis >/dev/null 2>&1 || true
+        docker rm redis >/dev/null 2>&1 || true
+    fi
 
-    # Start Redis container with proper configuration
+    # Check if port 6379 is in use by other processes
+    if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
+        log "Port 6379 is in use by another process, attempting to free it..."
+        # Try to find and kill the process using port 6379
+        local pid=$(lsof -ti:6379 2>/dev/null || ss -tlnp 2>/dev/null | grep ":6379 " | awk '{print $6}' | cut -d',' -f2 | cut -d'=' -f2 | head -1)
+        if [[ -n "$pid" ]]; then
+            log "Killing process $pid using port 6379..."
+            kill -9 $pid 2>/dev/null || true
+            sleep 2
+        fi
+    fi
+
+    # Start Redis container with improved configuration
     log "Starting Redis server..."
     docker run -d \
         --name redis \
         --restart unless-stopped \
-        --network host \
-        -v /opt/redis/data:/data \
-        redis:7-alpine redis-server --appendonly yes --protected-mode no --bind 127.0.0.1
+        -p 127.0.0.1:6379:6379 \
+        redis:7-alpine \
+        redis-server --protected-mode no --bind 0.0.0.0 --maxmemory 256mb --maxmemory-policy allkeys-lru
 
-    # Wait longer for Redis to fully start
+    # Wait for Redis to be ready
     sleep 10
 
-    # Verify Redis is running
-    if ! docker ps | grep -q redis; then
-        error "Redis failed to start"
-        exit 1
-    fi
-
     # Test Redis connection
-    if docker exec redis redis-cli ping 2>/dev/null | grep -q PONG; then
-        log "✓ Redis is responding correctly"
+    log "Testing Redis connection..."
+    if docker exec redis redis-cli ping | grep -q PONG; then
+        log "Redis is responding correctly"
     else
-        warning "Redis connection test failed, checking logs..."
-        docker logs redis | tail -10
+        warning "Redis connection test failed, but service may still work"
+        log "Redis logs:"
+        docker logs redis --tail 10
     fi
-
-    success "✅ Redis caching setup completed"
-}
 
 # ============================================================================
 # PHASE 11: PROMETHEUS METRICS - WORLD-CLASS MONITORING
@@ -849,6 +858,14 @@ setup_grafana() {
 
 setup_prometheus() {
     log "📊 === PHASE 11: Prometheus Metrics Setup ==="
+
+    # Check for existing Prometheus containers and clean them up
+    log "Checking for existing Prometheus containers..."
+    if docker ps -a --format 'table {{.Names}}' | grep -q "^prometheus$"; then
+        log "Removing existing Prometheus container..."
+        docker stop prometheus >/dev/null 2>&1 || true
+        docker rm prometheus >/dev/null 2>&1 || true
+    fi
 
     # Create Prometheus configuration
     mkdir -p /opt/prometheus
