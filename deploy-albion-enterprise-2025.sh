@@ -12,20 +12,8 @@
 set -euo pipefail
 
 # ============================================================================
-# CONFIGURATION & ENVIRONMENT
+# UTILITY FUNCTIONS (DEFINED FIRST - BEFORE ANY USE)
 # ============================================================================
-
-# Load environment variables
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/.env.local"
-
-if [[ -f "$ENV_FILE" ]]; then
-    log "Loading environment variables from $ENV_FILE"
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-else
-    log "Warning: $ENV_FILE not found. Using default values and environment variables."
-fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -62,6 +50,22 @@ retry_with_backoff() {
     error "Command failed after $max_attempts attempts"
     return 1
 }
+
+# ============================================================================
+# CONFIGURATION & ENVIRONMENT
+# ============================================================================
+
+# Load environment variables
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/.env.local"
+
+if [[ -f "$ENV_FILE" ]]; then
+    log "Loading environment variables from $ENV_FILE"
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+else
+    log "Warning: $ENV_FILE not found. Using default values and environment variables."
+fi
 
 # ============================================================================
 # PRE-FLIGHT CHECKS - OCTOBER 2025 STANDARDS
@@ -2385,13 +2389,13 @@ class GDPRManager {
   initializeGDPR() {
     // Check if user is in EU
     this.detectEuropeanUser();
-    
+
     // Load existing consents
     this.loadStoredConsents();
-    
+
     // Set up consent listeners
     this.setupConsentListeners();
-    
+
     console.log('GDPR compliance system initialized');
   }
 
@@ -2407,11 +2411,11 @@ class GDPRManager {
     // Try to detect location
     const userCountry = this.getUserCountry();
     this.isEuropean = euCountries.includes(userCountry);
-    
+
     if (this.isEuropean) {
       this.showGDPRBanner();
     }
-    
+
     return this.isEuropean;
   }
 
@@ -2431,7 +2435,7 @@ class GDPRManager {
         continue;
       }
     }
-    
+
     return 'US';
   }
 
@@ -2441,13 +2445,13 @@ class GDPRManager {
     banner.id = 'gdpr-banner';
     banner.innerHTML = `
       <div style="
-        position: fixed; 
-        bottom: 0; 
-        left: 0; 
-        right: 0; 
-        background: #1f2937; 
-        color: white; 
-        padding: 20px; 
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: #1f2937;
+        color: white;
+        padding: 20px;
         z-index: 10000;
         font-family: system-ui, sans-serif;
         box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
@@ -2456,35 +2460,35 @@ class GDPRManager {
           <div style="flex: 1; min-width: 300px;">
             <h3 style="margin: 0 0 10px 0; font-size: 18px;">🍪 Cookie Preferences</h3>
             <p style="margin: 0; font-size: 14px; opacity: 0.9;">
-              We use cookies to enhance your experience. By continuing to use our site, you agree to our 
-              <a href="/privacy-policy" style="color: #60a5fa; text-decoration: underline;">Privacy Policy</a> and 
+              We use cookies to enhance your experience. By continuing to use our site, you agree to our
+              <a href="/privacy-policy" style="color: #60a5fa; text-decoration: underline;">Privacy Policy</a> and
               <a href="/cookie-policy" style="color: #60a5fa; text-decoration: underline;">Cookie Policy</a>.
             </p>
           </div>
           <div style="display: flex; gap: 10px; flex-wrap: wrap;">
             <button id="gdpr-accept-all" style="
-              background: #10b981; 
-              color: white; 
-              border: none; 
-              padding: 10px 20px; 
-              border-radius: 6px; 
-              cursor: pointer; 
+              background: #10b981;
+              color: white;
+              border: none;
+              padding: 10px 20px;
+              border-radius: 6px;
+              cursor: pointer;
               font-weight: 500;
             ">Accept All</button>
             <button id="gdpr-reject-all" style="
-              background: #6b7280; 
-              color: white; 
-              border: none; 
-              padding: 10px 20px; 
-              border-radius: 6px; 
+              background: #6b7280;
+              color: white;
+              border: none;
+              padding: 10px 20px;
+              border-radius: 6px;
               cursor: pointer;
             ">Reject All</button>
             <button id="gdpr-customize" style="
-              background: transparent; 
-              color: #60a5fa; 
-              border: 1px solid #60a5fa; 
-              padding: 10px 20px; 
-              border-radius: 6px; 
+              background: transparent;
+              color: #60a5fa;
+              border: 1px solid #60a5fa;
+              padding: 10px 20px;
+              border-radius: 6px;
               cursor: pointer;
             ">Customize</button>
           </div>
@@ -2516,22 +2520,22 @@ class GDPRManager {
     detailedBanner.id = 'gdpr-detailed';
     detailedBanner.innerHTML = `
       <div style="
-        position: fixed; 
-        top: 50%; 
-        left: 50%; 
-        transform: translate(-50%, -50%); 
-        background: white; 
-        padding: 30px; 
-        border-radius: 12px; 
-        box-shadow: 0 20px 40px rgba(0,0,0,0.3); 
-        z-index: 10001; 
-        max-width: 600px; 
-        max-height: 80vh; 
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        padding: 30px;
+        border-radius: 12px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+        z-index: 10001;
+        max-width: 600px;
+        max-height: 80vh;
         overflow-y: auto;
         font-family: system-ui, sans-serif;
       ">
         <h2 style="margin: 0 0 20px 0; color: #1f2937;">Cookie Preferences</h2>
-        
+
         <div style="margin-bottom: 20px;">
           <label style="display: flex; align-items: center; margin-bottom: 10px;">
             <input type="checkbox" id="essential-cookies" checked disabled style="margin-right: 10px;">
@@ -2540,7 +2544,7 @@ class GDPRManager {
               <p style="margin: 5px 0 0 0; font-size: 14px; color: #6b7280;">Required for website functionality. Cannot be disabled.</p>
             </div>
           </label>
-          
+
           <label style="display: flex; align-items: center; margin-bottom: 10px;">
             <input type="checkbox" id="analytics-cookies" style="margin-right: 10px;">
             <div>
@@ -2548,7 +2552,7 @@ class GDPRManager {
               <p style="margin: 5px 0 0 0; font-size: 14px; color: #6b7280;">Help us understand how visitors interact with our website.</p>
             </div>
           </label>
-          
+
           <label style="display: flex; align-items: center; margin-bottom: 10px;">
             <input type="checkbox" id="marketing-cookies" style="margin-right: 10px;">
             <div>
@@ -2557,14 +2561,14 @@ class GDPRManager {
             </div>
           </label>
         </div>
-        
+
         <div style="display: flex; gap: 10px; justify-content: flex-end;">
           <button id="gdpr-save-preferences" style="
-            background: #10b981; 
-            color: white; 
-            border: none; 
-            padding: 10px 20px; 
-            border-radius: 6px; 
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
             cursor: pointer;
           ">Save Preferences</button>
         </div>
@@ -2576,10 +2580,10 @@ class GDPRManager {
     document.getElementById('gdpr-save-preferences').addEventListener('click', () => {
       const analytics = document.getElementById('analytics-cookies').checked;
       const marketing = document.getElementById('marketing-cookies').checked;
-      
+
       this.setConsent('analytics', analytics);
       this.setConsent('marketing', marketing);
-      
+
       document.getElementById('gdpr-banner').remove();
       detailedBanner.remove();
     });
@@ -2596,7 +2600,7 @@ class GDPRManager {
 
     this.consents.set(type, consent);
     localStorage.setItem(`gdpr_consent_${type}`, JSON.stringify(consent));
-    
+
     // Log consent for audit
     this.auditLog.push({
       action: 'consent_set',
@@ -2637,7 +2641,7 @@ class GDPRManager {
   loadStoredConsents() {
     // Load previously stored consents
     const consentTypes = ['essential', 'analytics', 'marketing'];
-    
+
     consentTypes.forEach(type => {
       const stored = localStorage.getItem(`gdpr_consent_${type}`);
       if (stored) {
@@ -2661,7 +2665,7 @@ class GDPRManager {
   // Data subject rights (GDPR Article 15-22)
   async requestDataExport(userId) {
     const requestId = `export_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
     this.dataRequests.set(requestId, {
       type: 'export',
       userId,
@@ -2671,10 +2675,10 @@ class GDPRManager {
 
     // In production, this would query all user data from databases
     const userData = await this.collectUserData(userId);
-    
+
     // Encrypt and prepare for download
     const encryptedData = await this.encryptData(userData);
-    
+
     this.dataRequests.set(requestId, {
       ...this.dataRequests.get(requestId),
       status: 'completed',
@@ -2686,7 +2690,7 @@ class GDPRManager {
 
   async requestDataDeletion(userId) {
     const requestId = `delete_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+
     this.dataRequests.set(requestId, {
       type: 'deletion',
       userId,
@@ -2696,7 +2700,7 @@ class GDPRManager {
 
     // In production, this would delete user data from all systems
     await this.deleteUserData(userId);
-    
+
     this.dataRequests.set(requestId, {
       ...this.dataRequests.get(requestId),
       status: 'completed'
@@ -3741,7 +3745,7 @@ ACCESS ENDPOINTS:
 
 DATA FLOW:
 1️⃣ **Ingestion:** APIs → Kafka → Redis Cache → ClickHouse/TimescaleDB
-2️⃣ **Processing:** Flink → Real-time analytics → WebSocket broadcasting  
+2️⃣ **Processing:** Flink → Real-time analytics → WebSocket broadcasting
 3️⃣ **Serving:** CDN → Browser cache → Predictive preloading
 4️⃣ **Storage:** Hot data (Redis) → Warm data (TimescaleDB) → Cold data (ClickHouse)
 5️⃣ **Optimization:** Rust ML engine → Predictive analytics → Performance monitoring
