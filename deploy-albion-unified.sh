@@ -488,6 +488,88 @@ EOF
 }
 
 # ============================================================================
+# PHASE 7: ALBION ONLINE DATABASE SCHEMA
+# ============================================================================
+
+setup_albion_database() {
+    log "🗄️ === PHASE 7: Albion Online Database Schema ==="
+
+    # Wait for PostgreSQL to be ready
+    sleep 30
+
+    # Get the database container name
+    local db_container=$(docker ps -q -f name=supabase-db)
+
+    if [[ -z "$db_container" ]]; then
+        warning "Database container not found, skipping schema setup"
+        return
+    fi
+
+    # Create TimescaleDB extension for time-series data
+    log "Enabling TimescaleDB extension..."
+    docker exec "$db_container" psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" 2>/dev/null || true
+
+    # Create market prices hypertable
+    log "Creating market prices hypertable..."
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS market_prices (
+        id SERIAL PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        city TEXT NOT NULL,
+        buy_price INTEGER,
+        sell_price INTEGER,
+        timestamp TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    SELECT create_hypertable('market_prices', 'timestamp', if_not_exists => TRUE);
+
+    -- Add retention policy (90 days)
+    SELECT add_retention_policy('market_prices', INTERVAL '90 days');
+
+    -- Create indexes
+    CREATE INDEX IF NOT EXISTS idx_market_prices_item_city_timestamp
+    ON market_prices (item_id, city, timestamp DESC);
+EOF
+
+    # Create flip suggestions table
+    log "Creating flip suggestions table..."
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS flip_suggestions (
+        id SERIAL PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        city TEXT NOT NULL,
+        buy_price INTEGER NOT NULL,
+        sell_price INTEGER NOT NULL,
+        roi DECIMAL(5,4) NOT NULL,
+        confidence INTEGER NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_flip_suggestions_city_confidence
+    ON flip_suggestions (city, confidence DESC);
+EOF
+
+    # Create PvP matchups table
+    log "Creating PvP matchups table..."
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS pvp_matchups (
+        id SERIAL PRIMARY KEY,
+        weapon TEXT NOT NULL,
+        vs_weapon TEXT NOT NULL,
+        wins INTEGER NOT NULL,
+        losses INTEGER NOT NULL,
+        window TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pvp_matchups_weapon_window
+    ON pvp_matchups (weapon, window);
+EOF
+
+    success "✅ Albion Online database schema created"
+}
+
+# ============================================================================
 # PHASE 4: MINIO S3 STORAGE - ROADMAP STANDARDS
 # ============================================================================
 
