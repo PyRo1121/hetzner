@@ -978,6 +978,34 @@ setup_redis() {
         sleep 2
     fi
 
+    # Kill processes using port 6379 directly with killall if available
+    if command -v killall >/dev/null 2>&1; then
+        log "Using killall to kill Redis processes..."
+        killall -9 redis-server 2>/dev/null || true
+        killall -9 redis 2>/dev/null || true
+        sleep 2
+    fi
+
+    # Final aggressive cleanup - check and kill any remaining processes on port 6379
+    if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
+        log "Port 6379 still in use, final aggressive cleanup..."
+        # Try to get all PIDs and kill them forcefully
+        local all_pids=$(lsof -ti:6379 2>/dev/null | xargs echo || ss -tlnp 2>/dev/null | grep ":6379 " | awk '{print $6}' | cut -d',' -f2 | cut -d'=' -f2 | xargs echo)
+        if [[ -n "$all_pids" ]]; then
+            log "Force killing all processes using port 6379: $all_pids"
+            for pid in $all_pids; do
+                kill -9 $pid 2>/dev/null || true
+                # Also try to kill the parent process
+                local parent_pid=$(ps -o ppid= -p $pid 2>/dev/null | xargs echo)
+                if [[ -n "$parent_pid" && "$parent_pid" != "1" ]]; then
+                    log "Killing parent process $parent_pid"
+                    kill -9 $parent_pid 2>/dev/null || true
+                fi
+            done
+            sleep 5
+        fi
+    fi
+
     # Kill any process using port 6379 more aggressively
     if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
         log "Port 6379 still in use, using more aggressive cleanup..."
@@ -994,21 +1022,28 @@ setup_redis() {
 
     # Final check - ensure port is free
     if netstat -tuln 2>/dev/null | grep -q ":6379 "; then
-        log "CRITICAL: Port 6379 still in use after cleanup attempts"
+        log "CRITICAL: Port 6379 still in use after all cleanup attempts"
         log "🔍 TROUBLESHOOTING: Run these commands manually to identify the process:"
         log "   sudo netstat -tlnp | grep :6379"
         log "   sudo lsof -i :6379"
         log "   sudo ss -tlnp | grep :6379"
+        log "   sudo ps aux | grep redis"
         log ""
         log "💡 If you find a process using port 6379, kill it with:"
         log "   sudo kill -9 <PID>"
+        log "   sudo killall -9 redis-server"
+        log "   sudo killall -9 redis"
         log ""
         log "🔧 Or check for Docker containers using the port:"
         log "   docker ps -a | grep redis"
         log "   docker stop <container_id> && docker rm <container_id>"
-        error "Failed to free port 6379. Please manually kill the process using it and re-run the script."
+        log ""
+        log "🛑 STOPPING DEPLOYMENT: Please manually resolve the port conflict and re-run the script."
+        error "Failed to free port 6379. Manual intervention required."
         exit 1
     fi
+
+    log "✅ Port 6379 confirmed free - proceeding with Redis deployment"
 
     # Start Redis container with 2025 security and performance standards
     log "Starting Redis server with enhanced security..."
