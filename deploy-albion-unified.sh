@@ -274,14 +274,35 @@ setup_supabase() {
                 log "✓ docker-compose.yml syntax fixed successfully"
             else
                 log "Automatic fix failed, trying alternative approach..."
-                # Download a known working version
-                curl -s https://raw.githubusercontent.com/supabase/supabase/master/docker/docker-compose.yml -o docker-compose.yml.fresh
-                if docker compose config --quiet docker-compose.yml.fresh 2>/dev/null; then
-                    mv docker-compose.yml.fresh docker-compose.yml
-                    log "✓ Downloaded fresh docker-compose.yml successfully"
+                # Download a known working version from Supabase repo
+                log "Downloading fresh docker-compose.yml from Supabase repository..."
+                if curl -s -f https://raw.githubusercontent.com/supabase/supabase/master/docker/docker-compose.yml -o docker-compose.yml.fresh 2>/dev/null; then
+                    log "Downloaded fresh file, validating..."
+                    if docker compose config --quiet docker-compose.yml.fresh 2>/dev/null; then
+                        mv docker-compose.yml.fresh docker-compose.yml
+                        log "✓ Downloaded fresh docker-compose.yml successfully"
+                    else
+                        log "Fresh download has syntax errors too, trying manual fix..."
+                        # Manual fix for the known duplicate container_name issue
+                        sed -i '/container_name: supabase-analytics$/d' docker-compose.yml.fresh
+                        if docker compose config --quiet docker-compose.yml.fresh 2>/dev/null; then
+                            mv docker-compose.yml.fresh docker-compose.yml
+                            log "✓ Manually fixed docker-compose.yml successfully"
+                        else
+                            log "Manual fix failed, keeping original"
+                        fi
+                    fi
                 else
-                    log "⚠ All fixes failed, using original file"
-                    cp docker-compose.yml.original docker-compose.yml
+                    log "Failed to download fresh docker-compose.yml"
+                    # Last resort: manually fix the current file
+                    cp docker-compose.yml docker-compose.yml.backup
+                    sed -i '/container_name: supabase-analytics$/d' docker-compose.yml
+                    if docker compose config --quiet 2>/dev/null; then
+                        log "✓ Manually fixed existing docker-compose.yml"
+                    else
+                        mv docker-compose.yml.backup docker-compose.yml
+                        log "⚠ All fixes failed, manual intervention required"
+                    fi
                 fi
             fi
         else
