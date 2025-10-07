@@ -459,7 +459,7 @@ setup_minio() {
     # Generate MinIO credentials
     MINIO_ROOT_USER="minioadmin"
     MINIO_ROOT_PASSWORD=$(openssl rand -hex 16)
-    
+
     # Start MinIO container
     log "Starting MinIO server..."
     docker run -d \
@@ -513,13 +513,13 @@ setup_caddy() {
 
     # Install Caddy
     log "Installing Caddy $CADDY_VERSION..."
-    
+
     # Import GPG key properly
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    
+
     # Add repository with proper GPG key reference
     echo "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" | tee /etc/apt/sources.list.d/caddy-stable.list
-    
+
     # Update package list and install Caddy
     /usr/bin/apt-get update
     /usr/bin/apt-get install -y caddy
@@ -1031,21 +1031,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
         with:
           bun-version: ${{ env.BUN_VERSION }}
-      
+
       - name: Install dependencies
         run: bun install
-      
+
       - name: Run tests
         run: bun test
-      
+
       - name: Run linting
         run: bun run lint
-      
+
       - name: Type check
         run: bun run type-check
 
@@ -1054,18 +1054,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
         with:
           bun-version: ${{ env.BUN_VERSION }}
-      
+
       - name: Install dependencies
         run: bun install
-      
+
       - name: Build application
         run: bun run build
-      
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -1079,13 +1079,13 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: build-files
           path: .next/
-      
+
       - name: Deploy to Coolify
         env:
           COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
@@ -1109,7 +1109,7 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Deploy Cloudflare Workers
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -1133,24 +1133,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
         with:
           bun-version: '1.0.0'
-      
+
       - name: Install dependencies
         run: bun install
-      
+
       - name: Build application
         run: bun run build
-      
+
       - name: Start application
         run: bun run start &
-        
+
       - name: Wait for server
         run: sleep 30
-      
+
       - name: Run Lighthouse CI
         run: bun run lighthouse:ci
 EOF
@@ -1266,39 +1266,39 @@ error() {
 # Check if required environment variables are set
 check_env_vars() {
     log "Checking environment variables..."
-    
+
     required_vars=(
         "COOLIFY_API_TOKEN"
         "COOLIFY_SERVER_URL"
         "COOLIFY_PROJECT_UUID"
     )
-    
+
     for var in "${required_vars[@]}"; do
         if [[ -z "${!var}" ]]; then
             error "Environment variable $var is not set"
         fi
     done
-    
+
     log "All required environment variables are set"
 }
 
 # Create project in Coolify
 create_coolify_project() {
     log "Creating project in Coolify..."
-    
+
     curl -X POST \
         -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
         -H "Content-Type: application/json" \
         "$COOLIFY_SERVER_URL/api/v1/projects" \
         -d @coolify.json
-    
+
     log "Project created successfully"
 }
 
 # Deploy to Coolify
 deploy_to_coolify() {
     log "Deploying to Coolify..."
-    
+
     response=$(curl -X POST \
         -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
         -H "Content-Type: application/json" \
@@ -1307,7 +1307,7 @@ deploy_to_coolify() {
             "uuid": "'$COOLIFY_PROJECT_UUID'",
             "force_rebuild": true
         }')
-    
+
     if [[ $? -eq 0 ]]; then
         log "Deployment triggered successfully"
         echo "Response: $response"
@@ -1319,10 +1319,10 @@ deploy_to_coolify() {
 # Main deployment function
 main() {
     log "Starting Coolify deployment..."
-    
+
     check_env_vars
     deploy_to_coolify
-    
+
     log "Deployment completed successfully!"
     log "Check your Coolify dashboard at: $COOLIFY_SERVER_URL"
 }
@@ -1452,34 +1452,6 @@ EOF
     log "✅ Coolify CI/CD pipeline setup completed!"
     log "📖 Check COOLIFY-SETUP.md for detailed setup instructions"
     log "🚀 Access Coolify dashboard at: http://$(curl -s ifconfig.me):8000"
-}
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-
-# Cloudflare Configuration
-CLOUDFLARE_API_TOKEN=your-api-token
-CLOUDFLARE_ACCOUNT_ID=your-account-id
-
-# MinIO Configuration
-MINIO_ENDPOINT=localhost:9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin123
-
-# Application Configuration
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-NODE_ENV=development
-LOG_LEVEL=info
-
-# Analytics (Optional)
-NEXT_PUBLIC_GA_ID=G-XXXXXXXXXX
-NEXT_PUBLIC_POSTHOG_KEY=phc_xxxxxxxxxx
-
-# Rate Limiting
-RATE_LIMIT_REQUESTS_PER_MINUTE=100
-RATE_LIMIT_WINDOW_MS=60000
-EOF
-
-    success "✅ CI/CD pipeline setup completed"
 }
 
 # ============================================================================
