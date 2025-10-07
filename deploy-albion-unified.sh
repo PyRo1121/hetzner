@@ -248,7 +248,7 @@ setup_supabase() {
 version: '3.8'
 services:
   db:
-    image: supabase/postgres:15.1.0.147
+    image: supabase/postgres:15.6.1.147
     container_name: supabase-db
     restart: unless-stopped
     environment:
@@ -267,7 +267,7 @@ services:
       retries: 10
 
   rest:
-    image: postgrest/postgrest:v12.0.2
+    image: postgrest/postgrest:v12.2.3
     container_name: supabase-rest
     depends_on:
       db:
@@ -283,7 +283,7 @@ services:
       - "54321:3000"
 
   auth:
-    image: supabase/gotrue:v2.151.0
+    image: supabase/gotrue:v2.165.0
     container_name: supabase-auth
     depends_on:
       db:
@@ -323,7 +323,7 @@ services:
         condition: service_started
 
   storage:
-    image: supabase/storage-api:v0.46.5
+    image: supabase/storage-api:v1.11.9
     container_name: supabase-storage
     restart: unless-stopped
     environment:
@@ -465,7 +465,7 @@ setup_minio() {
         -e MINIO_ROOT_PASSWORD=$(openssl rand -hex 16) \
         -v /opt/minio/data:/data \
         -v /opt/minio/config:/root/.minio \
-        minio/minio server /data --console-address ":9001"
+        minio/minio:RELEASE.2024-10-29T16-01-48Z server /data --console-address ":9001"
 
     # Wait for MinIO to be ready
     sleep 10
