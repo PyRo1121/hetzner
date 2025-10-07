@@ -1,0 +1,54 @@
+# MinIO Helm Chart Values
+# Fixes outdated image versions causing ImagePullBackOff errors
+
+# Use stable MinIO image versions that are available
+image:
+  repository: bitnami/minio
+  tag: "2024.10.29-debian-12-r0"  # Use a known stable version
+  pullPolicy: IfNotPresent
+
+# Console configuration with correct repository name
+console:
+  enabled: true
+  image:
+    repository: bitnami/minio-console  # Fixed: was minio-object-browser
+    tag: "1.7.0-debian-12-r0"  # Use a known stable version
+    pullPolicy: IfNotPresent
+
+# Authentication
+auth:
+  rootUser: "minio_access"
+  rootPassword: "minio_secret"
+
+# Storage configuration
+persistence:
+  enabled: true
+  size: 25Gi
+  storageClass: ""
+
+# Resource limits
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 1
+    memory: 1Gi
+
+# Security context
+podSecurityContext:
+  enabled: true
+  fsGroup: 1001
+
+containerSecurityContext:
+  enabled: true
+  runAsUser: 1001
+  runAsNonRoot: true
+
+# Monitoring
+metrics:
+  serviceMonitor:
+    enabled: true
+
+# Mode
+mode: standalone

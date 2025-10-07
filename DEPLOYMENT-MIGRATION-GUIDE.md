@@ -15,6 +15,7 @@ The new unified deployment system consolidates multiple deployment scripts into 
 ## 📋 Pre-Migration Checklist
 
 ### 1. Backup Current Setup
+
 ```bash
 # Backup your current environment files
 cp .env .env.backup
@@ -28,6 +29,7 @@ tar -czf config_backup.tar.gz config/ scripts/
 ```
 
 ### 2. Review Current Configuration
+
 - Document your current environment variables
 - Note any custom Docker configurations
 - List any manual infrastructure setup steps
@@ -38,18 +40,20 @@ tar -czf config_backup.tar.gz config/ scripts/
 ### Step 1: Update Repository Structure
 
 1. **Pull Latest Changes**
+
    ```bash
    git pull origin main
    ```
 
 2. **Review New File Structure**
+
    ```
    scripts/infra/
    ├── deploy-unified-enterprise.sh    # Main deployment script
    ├── coolify-integration.sh          # CI/CD setup
    ├── environment-configs.sh          # Environment management
    └── .env.example                    # Configuration template
-   
+
    .github/workflows/
    ├── deploy-production.yml           # Production deployment
    ├── deploy-staging.yml              # Staging deployment
@@ -59,29 +63,31 @@ tar -czf config_backup.tar.gz config/ scripts/
 ### Step 2: Configure Environment Variables
 
 1. **Create New Environment Configuration**
+
    ```bash
    # Copy the new template
-   cp scripts/infra/.env.example .env.production
-   
+
+
    # Edit with your settings
    nano .env.production
    ```
 
 2. **Required Variables for Migration**
+
    ```bash
    # Core Application
    DOMAIN="yourdomain.com"
    EMAIL="admin@yourdomain.com"
-   
+
    # GitHub Integration
    GITHUB_REPO="your-username/albion-dashboard"
    GITHUB_TOKEN="your-github-token"
    GITHUB_WEBHOOK_SECRET="your-webhook-secret"
-   
+
    # Database (migrate existing values)
    DATABASE_URL="postgresql://user:pass@localhost:5432/albion"
    REDIS_URL="redis://localhost:6379"
-   
+
    # Supabase (migrate existing values)
    SUPABASE_URL="your-supabase-url"
    SUPABASE_ANON_KEY="your-anon-key"
@@ -91,6 +97,7 @@ tar -czf config_backup.tar.gz config/ scripts/
 ### Step 3: Choose Deployment Mode
 
 #### Option A: Docker Compose (Recommended for existing setups)
+
 ```bash
 # Set deployment mode
 export DEPLOYMENT_MODE="docker-compose"
@@ -100,6 +107,7 @@ sudo bash scripts/infra/deploy-unified-enterprise.sh
 ```
 
 #### Option B: Kubernetes (For scalable production)
+
 ```bash
 # Set deployment mode
 export DEPLOYMENT_MODE="kubernetes"
@@ -112,6 +120,7 @@ sudo bash scripts/infra/deploy-unified-enterprise.sh
 ```
 
 #### Option C: Enterprise with Coolify CI/CD
+
 ```bash
 # Set deployment mode
 export DEPLOYMENT_MODE="enterprise"
@@ -124,10 +133,11 @@ sudo bash scripts/infra/deploy-unified-enterprise.sh
 ### Step 4: Migrate Data (If Applicable)
 
 1. **Database Migration**
+
    ```bash
    # If you have existing data, restore it after deployment
    psql $DATABASE_URL < database_backup.sql
-   
+
    # Run any new migrations
    bun run db:migrate
    ```
@@ -163,13 +173,14 @@ sudo bash scripts/infra/deploy-unified-enterprise.sh
 ### Step 6: Verify Migration
 
 1. **Health Checks**
+
    ```bash
    # Check application health
    curl https://yourdomain.com/api/health
-   
+
    # Check database connectivity
    curl https://yourdomain.com/api/health/db
-   
+
    # Check Redis connectivity
    curl https://yourdomain.com/api/health/cache
    ```
@@ -190,6 +201,7 @@ sudo bash scripts/infra/deploy-unified-enterprise.sh
 ### Common Issues and Solutions
 
 #### 1. Environment Variable Conflicts
+
 ```bash
 # Check for conflicting variables
 env | grep -E "(DATABASE|REDIS|SUPABASE)"
@@ -199,6 +211,7 @@ unset OLD_VARIABLE_NAME
 ```
 
 #### 2. Port Conflicts
+
 ```bash
 # Check for port conflicts
 netstat -tulpn | grep -E "(80|443|5432|6379)"
@@ -210,6 +223,7 @@ sudo systemctl stop redis-server
 ```
 
 #### 3. Docker Issues
+
 ```bash
 # Clean up old containers
 docker system prune -a
@@ -219,6 +233,7 @@ docker volume prune
 ```
 
 #### 4. Kubernetes Migration Issues
+
 ```bash
 # Check k3s status
 sudo systemctl status k3s
@@ -235,6 +250,7 @@ kubectl logs -n platform deployment/albion-dashboard
 If migration fails, you can rollback:
 
 1. **Stop New Services**
+
    ```bash
    # Stop new deployment
    docker-compose down
@@ -243,14 +259,15 @@ If migration fails, you can rollback:
    ```
 
 2. **Restore Backup**
+
    ```bash
    # Restore environment
    cp .env.backup .env
    cp docker-compose.yml.backup docker-compose.yml
-   
+
    # Restore database
    psql your_database < database_backup.sql
-   
+
    # Restart old services
    docker-compose up -d
    ```
@@ -258,16 +275,19 @@ If migration fails, you can rollback:
 ## 📊 Post-Migration Optimization
 
 ### 1. Performance Tuning
+
 - Review resource allocation in new deployment
 - Adjust scaling parameters if using Kubernetes
 - Configure caching strategies
 
 ### 2. Security Hardening
+
 - Review SSL/TLS configuration
 - Update firewall rules
 - Configure rate limiting
 
 ### 3. Monitoring Setup
+
 - Configure alerting rules
 - Set up log aggregation
 - Establish backup procedures
@@ -290,6 +310,7 @@ If you encounter issues during migration:
 ---
 
 **Migration completed successfully? Don't forget to:**
+
 - Update your documentation
 - Inform your team about new deployment procedures
 - Schedule regular backups with the new system

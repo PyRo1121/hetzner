@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: gotrue
-          image: supabase/gotrue:v2.158.1 # Updated to latest stable version
+          image: supabase/gotrue:v2.165.0 # Updated to latest stable version
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
