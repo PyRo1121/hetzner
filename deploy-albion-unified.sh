@@ -240,13 +240,18 @@ setup_supabase() {
 
     # Wait for services to be ready
     log "Waiting for Supabase services to be ready..."
-    sleep 60
+    sleep 120  # Give more time for services to fully start
 
-    # Verify services are running
-    if ! docker ps | grep -q supabase; then
-        error "Supabase services failed to start"
+    # Check if Supabase containers are running
+    local supabase_containers=$(docker ps --filter name=supabase --format "{{.Names}}" | wc -l)
+    if [[ $supabase_containers -lt 10 ]]; then
+        warning "Only $supabase_containers Supabase containers running, expected at least 10"
+        docker ps --filter name=supabase
+        error "Supabase services may not have started completely"
         exit 1
     fi
+
+    log "Found $supabase_containers Supabase containers running"
 
     # Create Albion Online database schema
     log "Creating Albion Online database schema..."
