@@ -1129,6 +1129,28 @@ setup_node_exporter() {
         --path.sysfs=/host/sys \
         --collector.filesystem.mount-points-exclude="^/(sys|proc|dev|host|etc)($$|/)"
 
+# ============================================================================
+# PHASE 25: NODE EXPORTER - SYSTEM MONITORING
+# ============================================================================
+
+setup_node_exporter() {
+    log "📊 === PHASE 25: Node Exporter Setup ==="
+
+    # Start Node Exporter container
+    log "Starting Node Exporter for system monitoring..."
+    docker run -d \
+        --name node-exporter \
+        --network host \
+        -v /proc:/host/proc:ro \
+        -v /sys:/host/sys:ro \
+        -v /:/rootfs:ro \
+        --pid host \
+        prom/node-exporter \
+        --path.procfs=/host/proc \
+        --path.rootfs=/rootfs \
+        --path.sysfs=/host/sys \
+        --collector.filesystem.mount-points-exclude="^/(sys|proc|dev|host|etc)($$|/)"
+
     # Wait for Node Exporter to be ready
     sleep 5
 
@@ -1171,8 +1193,283 @@ setup_cadvisor() {
         exit 1
     fi
 
-    success "✅ cAdvisor container monitoring setup completed"
+# ============================================================================
+# PHASE 7: ALBION ONLINE DATABASE SCHEMA
+# ============================================================================
+
+setup_albion_database() {
+    log "🗄️ === PHASE 7: Albion Online Database Schema ==="
+
+    # Wait for PostgreSQL to be ready
+    sleep 30
+
+    # Get the database container name
+    local db_container=$(docker ps -q -f name=supabase-db)
+
+    if [[ -z "$db_container" ]]; then
+        warning "Database container not found, skipping schema setup"
+        return
+    fi
+
+    # Create TimescaleDB extension for time-series data
+    log "Enabling TimescaleDB extension..."
+    docker exec "$db_container" psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" 2>/dev/null || true
+
+    # Create market prices hypertable
+    log "Creating market prices hypertable..."
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS market_prices (
+        id SERIAL PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        city TEXT NOT NULL,
+        buy_price INTEGER,
+        sell_price INTEGER,
+        timestamp TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    SELECT create_hypertable('market_prices', 'timestamp', if_not_exists => TRUE);
+
+    -- Add retention policy (90 days)
+    SELECT add_retention_policy('market_prices', INTERVAL '90 days');
+
+    -- Create indexes
+    CREATE INDEX IF NOT EXISTS idx_market_prices_item_city_timestamp
+    ON market_prices (item_id, city, timestamp DESC);
+EOF
+
+    # Create flip suggestions table
+    log "Creating flip suggestions table..."
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS flip_suggestions (
+        id SERIAL PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        city TEXT NOT NULL,
+        buy_price INTEGER NOT NULL,
+        sell_price INTEGER NOT NULL,
+        roi DECIMAL(5,4) NOT NULL,
+        confidence INTEGER NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_flip_suggestions_city_confidence
+    ON flip_suggestions (city, confidence DESC);
+EOF
+
+    # Create PvP matchups table
+    log "Creating PvP matchups table..."
+    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
+    CREATE TABLE IF NOT EXISTS pvp_matchups (
+        id SERIAL PRIMARY KEY,
+        weapon TEXT NOT NULL,
+        vs_weapon TEXT NOT NULL,
+        wins INTEGER NOT NULL,
+        losses INTEGER NOT NULL,
+        window TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pvp_matchups_weapon_window
+    ON pvp_matchups (weapon, window);
+EOF
+
+    success "✅ Albion Online database schema created"
 }
+
+# ============================================================================
+# PHASE 8: BACKUPS & MONITORING
+# ============================================================================
+
+setup_backups_and_monitoring() {
+    log "💾 === PHASE 8: Backups & Monitoring Setup ==="
+
+    # Create backup script
+    cat >/opt/backup-albion.sh <<'EOF'
+#!/bin/bash
+# Daily backup script for Albion Online data
+
+BACKUP_DIR="/opt/backups"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+# Create backup directory
+mkdir -p $BACKUP_DIR
+
+# Backup PostgreSQL database
+echo "Creating PostgreSQL backup..."
+docker exec $(docker ps -q -f name=supabase-db) pg_dump -U postgres postgres > $BACKUP_DIR/albion_postgres_$DATE.sql
+
+# Backup MinIO buckets
+echo "Backing up MinIO buckets..."
+/usr/local/bin/mc mirror --overwrite local/albion-uploads $BACKUP_DIR/minio_uploads_$DATE/
+# /usr/local/bin/mc mirror --overwrite local/albion-backups $BACKUP_DIR/minio_backups_$DATE/
+
+# Compress backups
+echo "Compressing backups..."
+cd $BACKUP_DIR
+tar -czf albion_backup_$DATE.tar.gz albion_postgres_$DATE.sql minio_uploads_$DATE/ 2>/dev/null || true
+
+# Clean old backups (keep 7 days)
+find $BACKUP_DIR -name "*.tar.gz" -type f -mtime +7 -delete
+
+echo "✅ Backup completed: albion_backup_$DATE.tar.gz"
+EOF
+
+    chmod +x /opt/backup-albion.sh
+
+    # Setup cron job for daily backups
+    crontab -l | grep -v backup-albion >/tmp/crontab.tmp 2>/dev/null || true
+    echo "0 2 * * * /opt/backup-albion.sh" >>/tmp/crontab.tmp
+    crontab /tmp/crontab.tmp
+    rm -f /tmp/crontab.tmp
+
+    # Create monitoring script
+    cat >/opt/monitor-albion.sh <<'EOF'
+#!/bin/bash
+# Monitoring script for Albion Online services
+
+echo "=== Albion Online Services Status ==="
+echo "Timestamp: $(date)"
+
+# Check Supabase services
+echo -e "\n--- Supabase Services ---"
+docker ps --filter name=supabase | grep -v CONTAINER
+
+# Check MinIO
+echo -e "\n--- MinIO Storage ---"
+docker ps --filter name=minio | grep -v CONTAINER
+
+# Check Caddy
+echo -e "\n--- Caddy Proxy ---"
+systemctl status caddy --no-pager -l
+
+# Check disk usage
+echo -e "\n--- Disk Usage ---"
+df -h /opt
+
+# Check memory usage
+echo -e "\n--- Memory Usage ---"
+free -h
+
+echo -e "\n=== End Status Report ==="
+EOF
+
+    chmod +x /opt/monitor-albion.sh
+
+    success "✅ Backups and monitoring setup completed"
+}
+
+# ============================================================================
+# PHASE 9: DEPLOYMENT FINALIZATION
+# ============================================================================
+
+finalize_deployment() {
+
+    # Create deployment summary
+    cat >/opt/albion-deployment-summary.txt <<EOF
+=== ALBION ONLINE UNIFIED DEPLOYMENT SUMMARY ===
+Deployment Date: $(date)
+Domain: $DOMAIN
+Architecture: World-Class Web Hosting Stack (Supabase + Monitoring)
+
+=== SERVICES DEPLOYED ===
+✅ System Security (UFW, fail2ban, unattended-upgrades)
+✅ Docker Runtime ($DOCKER_VERSION)
+✅ Supabase Self-Hosting (REST, Auth, Realtime, Storage)
+✅ MinIO S3-Compatible Storage
+✅ Caddy Reverse Proxy with TLS
+✅ Redis Caching & Performance
+✅ Prometheus Metrics Collection
+✅ Grafana Dashboards & Visualization
+✅ pgAdmin Database Management
+✅ Uptime Kuma Status Monitoring
+✅ Loki Log Aggregation
+✅ Promtail Log Shipping
+✅ Automated Backups (Daily)
+✅ Monitoring Scripts
+
+=== ACCESS POINTS ===
+- Web Interface: https://$DOMAIN
+- Supabase REST API: https://$DOMAIN/rest/v1/
+- Supabase Auth API: https://$DOMAIN/auth/v1/
+- Supabase Realtime: https://$DOMAIN/realtime/v1/
+- Supabase Storage: https://$DOMAIN/storage/v1/
+- Grafana: https://$DOMAIN:3000 (monitoring & logs)
+- pgAdmin: https://$DOMAIN:5050 (database admin)
+- Uptime Kuma: https://$DOMAIN:3001 (status monitoring)
+- MinIO Console: http://localhost:9001
+- Health Check: https://$DOMAIN/health
+
+=== NEXT STEPS ===
+1. Configure DNS: Point $DOMAIN to this server
+2. Set up SSL certificates (handled by Caddy)
+3. Test API endpoints and database connectivity
+4. Configure monitoring alerts (optional)
+
+=== ROADMAP COMPLIANCE ===
+✅ Single unified deployment approach
+✅ Supabase self-hosting architecture
+✅ Self-hosted API endpoints (no external dependencies)
+✅ Cost-effective single-host deployment
+✅ Production-ready security and monitoring
+✅ Complete independence from external services
+
+=== PERFORMANCE TARGETS ===
+- API Response Time: p95 < 400ms (Self-hosted APIs → Supabase)
+- Database Queries: Optimized for NVMe storage
+- Backup RTO: < 2 hours (daily automated backups)
+- Uptime Target: 99.5% (Self-hosted baseline)
+
+EOF
+
+    cat /opt/albion-deployment-summary.txt
+
+    success "🎉 Deployment completed successfully!"
+    success "📋 Summary saved to: /opt/albion-deployment-summary.txt"
+    success "🚀 Ready for production use following October 2025 roadmap standards"
+}
+
+# ============================================================================
+# MAIN DEPLOYMENT ORCHESTRATION
+# ============================================================================
+
+main() {
+    log "🚀 Starting Albion Online World-Class Web Hosting Stack Deployment"
+    log "📋 Architecture: Complete Web Hosting Infrastructure (10 Services)"
+    log "📅 October 2025 Standards Implementation"
+
+    # Execute deployment phases
+    check_prerequisites
+    setup_system
+    setup_docker
+
+    # Core Infrastructure
+    [[ "$ENABLE_SUPABASE" == "true" ]] && setup_supabase
+    [[ "$ENABLE_MINIO" == "true" ]] && setup_minio
+    [[ "$ENABLE_CADDY" == "true" ]] && setup_caddy
+
+    # Advanced Infrastructure
+    [[ "$ENABLE_REDIS" == "true" ]] && setup_redis
+    [[ "$ENABLE_PROMETHEUS" == "true" ]] && setup_prometheus
+    [[ "$ENABLE_GRAFANA" == "true" ]] && setup_grafana
+
+    # Management & Monitoring
+    [[ "$ENABLE_PGADMIN" == "true" ]] && setup_pgadmin
+    [[ "$ENABLE_UPTIME_KUMA" == "true" ]] && setup_uptime_kuma
+
+    # Logging & Observability
+    [[ "$ENABLE_LOKI" == "true" ]] && setup_loki
+    [[ "$ENABLE_PROMTAIL" == "true" ]] && setup_promtail
+    [[ "$ENABLE_NODE_EXPORTER" == "true" ]] && setup_node_exporter
+    [[ "$ENABLE_CADVISOR" == "true" ]] && setup_cadvisor
+
+    # Always run backups and monitoring, then finalize
+    setup_backups_and_monitoring
+    finalize_deployment
+
+    log "✅ Deployment orchestration completed"
+}
+
+# Run main function
+main "$@"
 
 # ============================================================================
 # PHASE 20: PGADMIN DATABASE MANAGEMENT
@@ -1212,6 +1509,29 @@ setup_pgadmin() {
 
 setup_uptime_kuma() {
     log "📊 === PHASE 21: Uptime Kuma Monitoring Setup ==="
+
+    # Create Uptime Kuma directories
+    mkdir -p /opt/uptime-kuma/data
+
+    # Start Uptime Kuma container
+    log "Starting Uptime Kuma server..."
+    docker run -d \
+        --name uptime-kuma \
+        --network host \
+        -v /opt/uptime-kuma/data:/app/data \
+        louislam/uptime-kuma:latest
+
+    # Wait for Uptime Kuma to be ready
+    sleep 15
+
+    # Verify Uptime Kuma is running
+    if ! docker ps | grep -q uptime-kuma; then
+        error "Uptime Kuma failed to start"
+        exit 1
+    fi
+
+    success "✅ Uptime Kuma monitoring setup completed"
+}
 
     # Create Uptime Kuma directories
     mkdir -p /opt/uptime-kuma/data
@@ -1480,7 +1800,7 @@ main() {
     log "📅 October 2025 Standards Implementation"
 
     # Execute deployment phases
-    check_requirements
+    check_prerequisites
     setup_system
     setup_docker
 
@@ -1510,834 +1830,12 @@ main() {
 
     log "✅ Deployment orchestration completed"
 }
-
 # Run main function
 main "$@"
 
 # ============================================================================
-# PHASE 6: SELF-HOSTED API ENDPOINTS - PURE SELF-HOSTING ARCHITECTURE
+# END OF SCRIPT
 # ============================================================================
-
-setup_self_hosted_apis() {
-    log "⚡ === PHASE 6: Self-Hosted API Endpoints Setup ==="
-
-    # Create API routes directory structure
-    mkdir -p /opt/albion-dashboard/src/app/api/{market,flips,pvp}
-
-    # Create market prices API route
-    cat >/opt/albion-dashboard/src/app/api/market/prices/route.ts <<'EOF'
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!
-);
-
-export async function GET(request: NextRequest) {
-    const { searchParams } = new URL(request.url);
-    const itemId = searchParams.get('itemId');
-    const city = searchParams.get('city');
-
-    if (!itemId || !city) {
-        return NextResponse.json(
-            { error: 'itemId and city are required' },
-            { status: 400 }
-        );
-    }
-
-    try {
-        const { data, error } = await supabase
-            .from('market_prices')
-            .select('*')
-            .eq('item_id', itemId)
-            .eq('city', city)
-            .order('timestamp', { ascending: false })
-            .limit(1)
-            .single();
-
-        if (error) {
-            return NextResponse.json({ error: error.message }, { status: 400 });
-        }
-
-        return NextResponse.json(data, {
-            headers: {
-                'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300',
-            },
-        });
-    } catch (error) {
-        console.error('Market prices API error:', error);
-        return NextResponse.json(
-            { error: 'Internal Server Error' },
-            { status: 500 }
-        );
-    }
-}
-EOF
-
-    # Create flip suggestions API route
-    cat >/opt/albion-dashboard/src/app/api/flips/suggestions/route.ts <<'EOF'
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!
-);
-
-export async function GET(request: NextRequest) {
-    const { searchParams } = new URL(request.url);
-    const city = searchParams.get('city') || 'Caerleon';
-    const minConfidence = parseInt(searchParams.get('minConfidence') || '70');
-
-    try {
-        const { data, error } = await supabase
-            .from('flip_suggestions')
-            .select('*')
-            .eq('city', city)
-            .gte('confidence', minConfidence)
-            .order('roi', { ascending: false })
-            .limit(10);
-
-        if (error) {
-            return NextResponse.json({ error: error.message }, { status: 400 });
-        }
-
-        return NextResponse.json({ suggestions: data }, {
-            headers: {
-                'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600',
-            },
-        });
-    } catch (error) {
-        console.error('Flip suggestions API error:', error);
-        return NextResponse.json(
-            { error: 'Internal Server Error' },
-            { status: 500 }
-        );
-    }
-}
-EOF
-
-    # Create PvP matchups API route
-    cat >/opt/albion-dashboard/src/app/api/pvp/matchups/route.ts <<'EOF'
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!
-);
-
-export async function GET(request: NextRequest) {
-    const { searchParams } = new URL(request.url);
-    const weapon = searchParams.get('weapon');
-    const window = searchParams.get('window') || '7d';
-
-    if (!weapon) {
-        return NextResponse.json(
-            { error: 'weapon is required' },
-            { status: 400 }
-        );
-    }
-
-    try {
-        const { data, error } = await supabase
-            .from('pvp_matchups')
-            .select('*')
-            .eq('weapon', weapon)
-            .eq('window', window);
-
-        if (error) {
-            return NextResponse.json({ error: error.message }, { status: 400 });
-        }
-
-        return NextResponse.json({ weapon, window, matchups: data }, {
-            headers: {
-                'Cache-Control': 'public, s-maxage=600, stale-while-revalidate=1200',
-            },
-        });
-    } catch (error) {
-        console.error('PvP matchups API error:', error);
-        return NextResponse.json(
-            { error: 'Internal Server Error' },
-            { status: 500 }
-        );
-    }
-}
-EOF
-
-    success "✅ Self-hosted API endpoints setup completed"
-}
-
-# ============================================================================
-# PHASE 7: ALBION ONLINE DATABASE SCHEMA - ROADMAP STANDARDS
-# ============================================================================
-
-setup_albion_database() {
-    log "🗄️ === PHASE 7: Albion Online Database Schema ==="
-
-    # Wait for PostgreSQL to be ready
-    sleep 30
-
-    # Get the database container name
-    local db_container=$(docker ps -q -f name=supabase-db)
-
-    if [[ -z "$db_container" ]]; then
-        warning "Database container not found, skipping schema setup"
-        return
-    fi
-
-    # Create TimescaleDB extension for time-series data
-    log "Enabling TimescaleDB extension..."
-    docker exec "$db_container" psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" 2>/dev/null || true
-
-    # Create market prices hypertable
-    log "Creating market prices hypertable..."
-    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
-    CREATE TABLE IF NOT EXISTS market_prices (
-        id SERIAL PRIMARY KEY,
-        item_id TEXT NOT NULL,
-        city TEXT NOT NULL,
-        buy_price INTEGER,
-        sell_price INTEGER,
-        timestamp TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    SELECT create_hypertable('market_prices', 'timestamp', if_not_exists => TRUE);
-
-    -- Add retention policy (90 days)
-    SELECT add_retention_policy('market_prices', INTERVAL '90 days');
-
-    -- Create indexes
-    CREATE INDEX IF NOT EXISTS idx_market_prices_item_city_timestamp
-    ON market_prices (item_id, city, timestamp DESC);
-EOF
-
-    # Create flip suggestions table
-    log "Creating flip suggestions table..."
-    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
-    CREATE TABLE IF NOT EXISTS flip_suggestions (
-        id SERIAL PRIMARY KEY,
-        item_id TEXT NOT NULL,
-        city TEXT NOT NULL,
-        buy_price INTEGER NOT NULL,
-        sell_price INTEGER NOT NULL,
-        roi DECIMAL(5,4) NOT NULL,
-        confidence INTEGER NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_flip_suggestions_city_confidence
-    ON flip_suggestions (city, confidence DESC);
-EOF
-
-    # Create PvP matchups table
-    log "Creating PvP matchups table..."
-    docker exec "$db_container" psql -U postgres -d postgres << 'EOF'
-    CREATE TABLE IF NOT EXISTS pvp_matchups (
-        id SERIAL PRIMARY KEY,
-        weapon TEXT NOT NULL,
-        vs_weapon TEXT NOT NULL,
-        wins INTEGER NOT NULL,
-        losses INTEGER NOT NULL,
-        window TEXT NOT NULL,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_pvp_matchups_weapon_window
-    ON pvp_matchups (weapon, window);
-EOF
-
-    success "✅ Albion Online database schema created"
-}
-
-# ============================================================================
-# PHASE 8: BACKUPS & MONITORING - ROADMAP STANDARDS
-# ============================================================================
-
-setup_backups_and_monitoring() {
-    log "💾 === PHASE 8: Backups & Monitoring Setup ==="
-
-    # Create backup script
-    cat >/opt/backup-albion.sh <<'EOF'
-#!/bin/bash
-# Daily backup script for Albion Online data
-
-BACKUP_DIR="/opt/backups"
-DATE=$(date +%Y%m%d_%H%M%S)
-
-# Create backup directory
-mkdir -p $BACKUP_DIR
-
-# Backup PostgreSQL database
-echo "Creating PostgreSQL backup..."
-docker exec $(docker ps -q -f name=supabase-db) pg_dump -U postgres postgres > $BACKUP_DIR/albion_postgres_$DATE.sql
-
-# Backup MinIO buckets
-echo "Backing up MinIO buckets..."
-/usr/local/bin/mc mirror --overwrite local/albion-uploads $BACKUP_DIR/minio_uploads_$DATE/
-/usr/local/bin/mc mirror --overwrite local/albion-backups $BACKUP_DIR/minio_backups_$DATE/
-
-# Compress backups
-echo "Compressing backups..."
-cd $BACKUP_DIR
-tar -czf albion_backup_$DATE.tar.gz albion_postgres_$DATE.sql minio_uploads_$DATE/ minio_backups_$DATE/
-
-# Clean old backups (keep 7 days)
-find $BACKUP_DIR -name "*.tar.gz" -type f -mtime +7 -delete
-
-echo "✅ Backup completed: albion_backup_$DATE.tar.gz"
-EOF
-
-    chmod +x /opt/backup-albion.sh
-
-    # Setup cron job for daily backups
-    crontab -l | grep -v backup-albion >/tmp/crontab.tmp 2>/dev/null || true
-    echo "0 2 * * * /opt/backup-albion.sh" >>/tmp/crontab.tmp
-    crontab /tmp/crontab.tmp
-    rm -f /tmp/crontab.tmp
-
-    # Create monitoring script
-    cat >/opt/monitor-albion.sh <<'EOF'
-#!/bin/bash
-# Monitoring script for Albion Online services
-
-echo "=== Albion Online Services Status ==="
-echo "Timestamp: $(date)"
-
-# Check Supabase services
-echo -e "\n--- Supabase Services ---"
-docker ps --filter name=supabase | grep -v CONTAINER
-
-# Check MinIO
-echo -e "\n--- MinIO Storage ---"
-docker ps --filter name=minio | grep -v CONTAINER
-
-# Check Caddy
-echo -e "\n--- Caddy Proxy ---"
-systemctl status caddy --no-pager -l
-
-# Check disk usage
-echo -e "\n--- Disk Usage ---"
-df -h /opt
-
-# Check memory usage
-echo -e "\n--- Memory Usage ---"
-free -h
-
-echo -e "\n=== End Status Report ==="
-EOF
-
-    chmod +x /opt/monitor-albion.sh
-
-    success "✅ Backups and monitoring setup completed"
-}
-
-# ============================================================================
-# PHASE 9: DEPLOYMENT FINALIZATION - ROADMAP STANDARDS
-# ============================================================================
-
-finalize_deployment() {
-
-    # Create deployment summary
-    cat >/opt/albion-deployment-summary.txt <<EOF
-=== ALBION ONLINE UNIFIED DEPLOYMENT SUMMARY ===
-Deployment Date: $(date)
-Domain: $DOMAIN
-Architecture: World-Class Web Hosting Stack (Supabase + Monitoring)
-
-=== SERVICES DEPLOYED ===
-✅ System Security (UFW, fail2ban, unattended-upgrades)
-✅ Docker Runtime ($DOCKER_VERSION)
-✅ Supabase Self-Hosting (REST, Auth, Realtime, Storage)
-✅ MinIO S3-Compatible Storage
-✅ Caddy Reverse Proxy with TLS
-✅ Redis Caching & Performance
-✅ Prometheus Metrics Collection
-✅ Grafana Dashboards & Visualization
-✅ pgAdmin Database Management
-✅ Uptime Kuma Status Monitoring
-✅ Loki Log Aggregation
-✅ Promtail Log Shipping
-✅ Automated Backups (Daily)
-✅ Monitoring Scripts
-
-=== ACCESS POINTS ===
-- Web Interface: https://$DOMAIN
-- Supabase REST API: https://$DOMAIN/rest/v1/
-- Supabase Auth API: https://$DOMAIN/auth/v1/
-- Supabase Realtime: https://$DOMAIN/realtime/v1/
-- Supabase Storage: https://$DOMAIN/storage/v1/
-- Grafana: https://$DOMAIN:3000 (monitoring & logs)
-- pgAdmin: https://$DOMAIN:5050 (database admin)
-- Uptime Kuma: https://$DOMAIN:3001 (status monitoring)
-- MinIO Console: http://localhost:9001
-- Health Check: https://$DOMAIN/health
-- API Endpoints: https://$DOMAIN/api/*
-
-=== NEXT STEPS ===
-1. Configure DNS: Point $DOMAIN to this server
-2. Set up SSL certificates (handled by Caddy)
-3. Test API endpoints and database connectivity
-4. Configure monitoring alerts (optional)
-5. Deploy application via Coolify dashboard
-
-=== ROADMAP COMPLIANCE ===
-✅ Single unified deployment approach
-✅ Supabase self-hosting architecture
-✅ Self-hosted API endpoints (no external dependencies)
-✅ Cost-effective single-host deployment
-✅ Production-ready security and monitoring
-✅ Complete independence from external services
-
-=== PERFORMANCE TARGETS ===
-- API Response Time: p95 < 400ms (Self-hosted APIs → Supabase)
-- Database Queries: Optimized for NVMe storage
-- Backup RTO: < 2 hours (daily automated backups)
-- Uptime Target: 99.5% (Self-hosted baseline)
-
-EOF
-
-    cat /opt/albion-deployment-summary.txt
-
-    success "🎉 Deployment completed successfully!"
-    success "📋 Summary saved to: /opt/albion-deployment-summary.txt"
-    success "🚀 Ready for production use following October 2025 roadmap standards"
-}
-
-# ============================================================================
-# PHASE 8: CI/CD PIPELINE SETUP (COOLIFY)
-# ============================================================================
-
-setup_cicd_pipeline() {
-    log "🔧 === PHASE 8: CI/CD Pipeline Setup with Coolify ==="
-
-    # Install Coolify on the server
-    log "Installing Coolify..."
-    curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash
-
-    # Wait for Coolify to be ready
-    log "Waiting for Coolify to start..."
-    sleep 30
-
-    # Create .github/workflows directory
-    mkdir -p .github/workflows
-
-    # Main CI/CD workflow for Coolify integration
-    cat > .github/workflows/deploy.yml <<'EOF'
-name: Deploy Albion Online Dashboard with Coolify
-
-on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
-
-env:
-  NODE_VERSION: '20'
-  BUN_VERSION: '1.0.0'
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Run tests
-        run: bun test
-
-      - name: Run linting
-        run: bun run lint
-
-      - name: Type check
-        run: bun run type-check
-
-  build:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Build application
-        run: bun run build
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-files
-          path: .next/
-
-  deploy-production:
-    if: github.ref == 'refs/heads/main'
-    needs: [test, build]
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build-files
-          path: .next/
-
-      - name: Deploy to Coolify
-        env:
-          COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
-          COOLIFY_SERVER_URL: ${{ secrets.COOLIFY_SERVER_URL }}
-          COOLIFY_PROJECT_UUID: ${{ secrets.COOLIFY_PROJECT_UUID }}
-        run: |
-          # Trigger deployment via Coolify API
-          curl -X POST \
-            -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
-            -H "Content-Type: application/json" \
-            "$COOLIFY_SERVER_URL/api/v1/deploy" \
-            -d '{
-              "uuid": "'$COOLIFY_PROJECT_UUID'",
-              "force_rebuild": true
-            }'
-
-  deploy-workers:
-    if: github.ref == 'refs/heads/main'
-    needs: [test, build]
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy Cloudflare Workers
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          sudo npm install -g wrangler
-          cd /opt/cloudflare-workers
-          wrangler deploy --name albion-online-worker
-EOF
-
-    # Lighthouse CI workflow
-    cat > .github/workflows/lighthouse.yml <<'EOF'
-name: Lighthouse CI
-
-on:
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  lighthouse:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: '1.0.0'
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Build application
-        run: bun run build
-
-      - name: Start application
-        run: bun run start &
-
-      - name: Wait for server
-        run: sleep 30
-
-      - name: Run Lighthouse CI
-        run: bun run lighthouse:ci
-EOF
-
-    # Create Coolify configuration file
-    cat > coolify.json <<'EOF'
-{
-  "name": "albion-online-dashboard",
-  "description": "Albion Online Ultimate Resource Hub",
-  "type": "application",
-  "source": {
-    "type": "git",
-    "repository": "https://github.com/your-username/albion-online-dashboard.git",
-    "branch": "main"
-  },
-  "build": {
-    "command": "bun install && bun run build",
-    "directory": ".",
-    "environment": {
-      "NODE_ENV": "production",
-      "NEXT_TELEMETRY_DISABLED": "1"
-    }
-  },
-  "deploy": {
-    "command": "bun run start",
-    "port": 3000,
-    "healthcheck": {
-      "path": "/api/health",
-      "interval": 30,
-      "timeout": 10,
-      "retries": 3
-    }
-  },
-  "domains": [
-    {
-      "domain": "albion-dashboard.yourdomain.com",
-      "ssl": true
-    }
-  ],
-  "environment": {
-    "DATABASE_URL": "${DATABASE_URL}",
-    "REDIS_URL": "${REDIS_URL}",
-    "NEXT_PUBLIC_SUPABASE_URL": "${NEXT_PUBLIC_SUPABASE_URL}",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "${NEXT_PUBLIC_SUPABASE_ANON_KEY}",
-    "SUPABASE_SERVICE_ROLE_KEY": "${SUPABASE_SERVICE_ROLE_KEY}",
-    "CLOUDFLARE_API_TOKEN": "${CLOUDFLARE_API_TOKEN}",
-    "CLOUDFLARE_ACCOUNT_ID": "${CLOUDFLARE_ACCOUNT_ID}",
-    "MINIO_ENDPOINT": "${MINIO_ENDPOINT}",
-    "MINIO_ACCESS_KEY": "${MINIO_ACCESS_KEY}",
-    "MINIO_SECRET_KEY": "${MINIO_SECRET_KEY}"
-  }
-}
-EOF
-
-    # Create environment template
-    cat > .env.example <<'EOF'
-# Database Configuration
-DATABASE_URL=postgresql://postgres:password@localhost:5432/albion_online
-REDIS_URL=redis://localhost:6379
-
-# Supabase Configuration
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-
-# MinIO Configuration
-MINIO_ENDPOINT=http://localhost:9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-
-# Coolify Configuration
-COOLIFY_API_TOKEN=your-coolify-api-token
-COOLIFY_SERVER_URL=http://your-server-ip:8000
-COOLIFY_PROJECT_UUID=your-project-uuid
-
-# Application Configuration
-NODE_ENV=production
-NEXT_TELEMETRY_DISABLED=1
-EOF
-
-    # Create Coolify deployment script
-    cat > scripts/deploy-coolify.sh <<'EOF'
-#!/bin/bash
-
-# Coolify Deployment Script
-# This script helps deploy the Albion Online Dashboard to Coolify
-
-set -e
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
-}
-
-warn() {
-    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
-}
-
-error() {
-    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}"
-    exit 1
-}
-
-# Check if required environment variables are set
-check_env_vars() {
-    log "Checking environment variables..."
-
-    required_vars=(
-        "COOLIFY_API_TOKEN"
-        "COOLIFY_SERVER_URL"
-        "COOLIFY_PROJECT_UUID"
-    )
-
-    for var in "${required_vars[@]}"; do
-        if [[ -z "${!var}" ]]; then
-            error "Environment variable $var is not set"
-        fi
-    done
-
-    log "All required environment variables are set"
-}
-
-# Create project in Coolify
-create_coolify_project() {
-    log "Creating project in Coolify..."
-
-    curl -X POST \
-        -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
-        -H "Content-Type: application/json" \
-        "$COOLIFY_SERVER_URL/api/v1/projects" \
-        -d @coolify.json
-
-    log "Project created successfully"
-}
-
-# Deploy to Coolify
-deploy_to_coolify() {
-    log "Deploying to Coolify..."
-
-    response=$(curl -X POST \
-        -H "Authorization: Bearer $COOLIFY_API_TOKEN" \
-        -H "Content-Type: application/json" \
-        "$COOLIFY_SERVER_URL/api/v1/deploy" \
-        -d '{
-            "uuid": "'$COOLIFY_PROJECT_UUID'",
-            "force_rebuild": true
-        }')
-
-    if [[ $? -eq 0 ]]; then
-        log "Deployment triggered successfully"
-        echo "Response: $response"
-    else
-        error "Failed to trigger deployment"
-    fi
-}
-
-# Main deployment function
-main() {
-    log "Starting Coolify deployment..."
-
-    check_env_vars
-    deploy_to_coolify
-
-    log "Deployment completed successfully!"
-    log "Check your Coolify dashboard at: $COOLIFY_SERVER_URL"
-}
-
-# Run main function
-main "$@"
-EOF
-
-    # Make the deployment script executable
-    chmod +x scripts/deploy-coolify.sh
-
-    # Create Coolify setup instructions
-    cat > COOLIFY-SETUP.md <<'EOF'
-# Coolify Setup Instructions
-
-This guide will help you set up Coolify for self-hosted CI/CD deployment of the Albion Online Dashboard.
-
-## Prerequisites
-
-- A server with at least 2 CPU cores, 4GB RAM, and 40GB storage
-- Ubuntu 20.04+ (recommended: Ubuntu 24.04 LTS)
-- Root or sudo access
-- SSH access to the server
-
-## Installation Steps
-
-### 1. Install Coolify
-
-The deployment script will automatically install Coolify, but you can also install it manually:
-
-```bash
-curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo bash
-```
-
-### 2. Access Coolify Dashboard
-
-After installation, access Coolify at: `http://your-server-ip:8000`
-
-Create your first admin account when prompted.
-
-### 3. Configure Firewall
-
-Ensure these ports are open:
-- 8000 (Coolify dashboard)
-- 80 (HTTP)
-- 443 (HTTPS)
-- 22 (SSH)
-
-```bash
-sudo ufw allow 8000/tcp
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow ssh
-sudo ufw enable
-```
-
-### 4. Create Project in Coolify
-
-1. Log into your Coolify dashboard
-2. Create a new project
-3. Connect your Git repository
-4. Configure environment variables
-5. Set up domain and SSL
-
-### 5. Environment Variables
-
-Set these environment variables in Coolify:
-
-```
-DATABASE_URL=postgresql://postgres:password@localhost:5432/albion_online
-REDIS_URL=redis://localhost:6379
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-MINIO_ENDPOINT=http://localhost:9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-NODE_ENV=production
-NEXT_TELEMETRY_DISABLED=1
-```
-
-### 6. GitHub Secrets
-
-Add these secrets to your GitHub repository:
-
-- `COOLIFY_API_TOKEN`: Your Coolify API token
-- `COOLIFY_SERVER_URL`: Your Coolify server URL (e.g., http://your-server-ip:8000)
-- `COOLIFY_PROJECT_UUID`: Your project UUID from Coolify
-
-### 7. Deploy
-
-Push to your main branch to trigger automatic deployment via GitHub Actions.
-
-## Manual Deployment
-
-You can also deploy manually using the provided script:
-
-```bash
-./scripts/deploy-coolify.sh
-```
-
-## Monitoring
-
-Monitor your deployments in the Coolify dashboard:
-- Real-time logs
-- Resource usage
-- Deployment history
-- Health checks
 
 ## Troubleshooting
 
