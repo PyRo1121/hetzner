@@ -20,6 +20,9 @@ const nextConfig = {
   },
   reactStrictMode: true,
   
+  // Enable standalone output for Docker deployment
+  output: 'standalone',
+
   // Allow dev origins for HMR
   allowedDevOrigins: ['10.133.134.10'],
   

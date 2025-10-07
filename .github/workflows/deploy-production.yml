@@ -1,0 +1,201 @@
+name: Deploy Albion Enterprise to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  setup-infrastructure:
+    name: Setup Kubernetes Infrastructure
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup kubectl
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+    - name: Deploy Infrastructure Stack
+      run: |
+        # Create namespace
+        kubectl create namespace albion-production --dry-run=client -o yaml | kubectl apply -f -
+
+        # Deploy PostgreSQL with TimescaleDB
+        kubectl apply -f k8s/postgres/
+        kubectl apply -f k8s/redis/
+
+        # Deploy Supabase (if using self-hosted)
+        kubectl apply -f k8s/supabase/
+
+        # Wait for infrastructure
+        kubectl wait --for=condition=available --timeout=300s deployment/postgres -n albion-production
+        kubectl wait --for=condition=available --timeout=300s deployment/redis -n albion-production
+
+  build-and-push:
+    name: Build and Push Images
+    runs-on: ubuntu-latest
+    environment: production
+    needs: setup-infrastructure
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push Next.js application
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          NEXT_PUBLIC_SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+
+    - name: Build and push data ingestion service
+      uses: docker/build-push-action@v5
+      with:
+        context: ./data-ingestion
+        file: ./data-ingestion/Dockerfile
+        push: true
+        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/data-ingestion:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  deploy-application:
+    name: Deploy Next.js Application to Kubernetes
+    runs-on: ubuntu-latest
+    environment: production
+    needs: build-and-push
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup kubectl
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+    - name: Deploy Next.js Application
+      run: |
+        # Update image tag in deployment
+        sed -i "s|image:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest|g" k8s/app/deployment.yaml
+
+        # Apply Kubernetes manifests
+        kubectl apply -f k8s/app/
+
+        # Wait for deployment
+        kubectl rollout status deployment/albion-dashboard -n albion-production --timeout=300s
+
+  deploy-data-ingestion:
+    name: Deploy Data Ingestion Service
+    runs-on: ubuntu-latest
+    environment: production
+    needs: build-and-push
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup kubectl
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+    - name: Deploy Data Ingestion CronJob
+      run: |
+        # Update image tag
+        sed -i "s|image:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/data-ingestion:latest|g" k8s/data-ingestion/cronjob.yaml
+
+        # Apply Kubernetes manifests
+        kubectl apply -f k8s/data-ingestion/
+
+        # Verify cronjob is scheduled
+        kubectl get cronjob -n albion-production
+
+  configure-cdn:
+    name: Configure Cloudflare CDN
+    runs-on: ubuntu-latest
+    environment: production
+    needs: deploy-application
+
+    steps:
+    - name: Configure Cloudflare CDN Rules
+      run: |
+        # Set up CDN rules for image optimization using your existing secrets
+        curl -X POST "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/rulesets" \
+          -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+          -H "Content-Type: application/json" \
+          --data '{
+            "name": "Albion Image Optimization",
+            "kind": "zone",
+            "phase": "http_request_transform",
+            "rules": [{
+              "expression": "http.request.uri.path matches \"^/api/items/.*\"",
+              "action": "rewrite",
+              "action_parameters": {
+                "uri": {
+                  "path": {
+                    "expression": "regex_replace(http.request.uri.path, \"^/api/items/\", \"/cdn-cgi/image/\")"
+                  }
+                }
+              }
+            }]
+          }'
+
+  production-validation:
+    name: Production Validation
+    runs-on: ubuntu-latest
+    environment: production
+    needs: [deploy-application, deploy-data-ingestion, configure-cdn]
+
+    steps:
+    - name: Setup kubectl
+      uses: azure/k8s-set-context@v3
+      with:
+        method: kubeconfig
+        kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+    - name: Health Check
+      run: |
+        # Check Kubernetes deployments
+        kubectl get pods -n albion-production
+        kubectl get services -n albion-production
+
+        # Get service URL
+        SERVICE_URL=$(kubectl get svc albion-dashboard -n albion-production -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+        # Wait for deployment
+        sleep 60
+
+        # Check application health
+        curl -f http://$SERVICE_URL/api/health
+
+        echo "🎉 Production deployment successful!"
+        echo "🌐 Dashboard: https://$SERVICE_URL"
+        echo "📊 Monitoring: https://monitoring.$SERVICE_URL"

@@ -1,0 +1,21 @@
+{
+  "name": "albion-data-ingestion",
+  "version": "1.0.0",
+  "description": "Albion Online data ingestion service for CI/CD deployment",
+  "main": "sync-all-apis.js",
+  "scripts": {
+    "sync": "node sync-all-apis.js",
+    "test": "echo \"No tests specified\""
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "axios": "^1.6.2",
+    "ioredis": "^5.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": ["albion", "data", "ingestion", "api"],
+  "author": "Albion Dashboard Team",
+  "license": "MIT"
+}

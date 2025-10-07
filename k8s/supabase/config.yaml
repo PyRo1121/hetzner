@@ -1,0 +1,13 @@
+# Supabase configuration - using hosted service
+# This file contains configuration for self-hosted Supabase if needed
+# Currently using Supabase hosted service via secrets
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: supabase-config
+  namespace: albion-production
+data:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+  SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

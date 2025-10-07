@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: albion-data-ingestion
+  namespace: albion-production
+spec:
+  schedule: "*/1 * * * *"  # Every minute
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: data-ingestion
+            image: ghcr.io/pyro1121/hetzner/data-ingestion:latest
+            env:
+            - name: SUPABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: supabase-url
+            - name: SUPABASE_SERVICE_ROLE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: supabase-service-role-key
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: redis-url
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "512Mi"
+                cpu: "200m"
+          restartPolicy: OnFailure
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: albion-production
+type: Opaque
+data:
+  supabase-url: ${{ secrets.SUPABASE_URL | base64 }}
+  supabase-anon-key: ${{ secrets.SUPABASE_ANON_KEY | base64 }}
+  supabase-service-role-key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY | base64 }}
+  nextauth-secret: ${{ secrets.NEXTAUTH_SECRET | base64 }}
+  redis-url: ${{ secrets.REDIS_URL | base64 }}
+  cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID | base64 }}
+  cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN | base64 }}

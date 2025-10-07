@@ -1,12 +1,11 @@
 #!/bin/bash
 
 # ============================================================================
-# ALBION ONLINE ENTERPRISE DEPLOYMENT SCRIPT - OCTOBER 2025 STANDARDS
+# ALBION ONLINE ENTERPRISE CI/CD SETUP - OCTOBER 2025 STANDARDS
 # ============================================================================
-# Architecture: Hosted Supabase + Redis Cloud + Coolify CI/CD + Monitoring
-# Security: Caddy SSL, UFW Firewall, fail2ban, SSO Integration
-# Monitoring: Prometheus + Grafana with 2025 security standards
-# Standards: Based on October 2025 best practices research
+# This script sets up the INFRASTRUCTURE ONLY
+# The actual application is deployed via Coolify CI/CD
+# GitHub secrets are used for all sensitive data
 # ============================================================================
 
 set -euo pipefail
@@ -4273,25 +4272,26 @@ EOF
 # ============================================================================
 
 main() {
-    log "🚀 Starting Albion Online Enterprise Deployment (October 2025 Standards)"
-    log "Architecture: Self-Hosted Supabase + TimescaleDB + ClickHouse + Redis + Extreme Performance"
+    log "🚀 Starting Albion Online Enterprise INFRASTRUCTURE Setup (October 2025 Standards)"
+    log "Infrastructure Only - Application deployed via Coolify CI/CD"
+    log "GitHub secrets used for all sensitive data"
 
-    # Run all phases
+    # Run infrastructure phases only
     check_prerequisites
     setup_system_security
     setup_coolify
     setup_supabase
     setup_clickhouse  # Optional: comment out if not needed
     setup_optimized_performance  # VPS-3 optimized (24GB RAM, 8 cores, no GPU)
-    setup_extreme_ingestion  # Optional: comment out if not needed
     setup_monitoring
     setup_caddy
-    deploy_albion_dashboard
-    setup_seo_and_ads  # NEW: SEO, AdSense, Performance
-    final_validation
 
-    success "🎯 Enterprise deployment orchestration completed!"
-    success "Check /root/deployment-summary.txt for full details"
+    # Note: Application deployment happens via GitHub Actions + Coolify
+    log "📋 INFRASTRUCTURE SETUP COMPLETE"
+    log "Next: Push to GitHub to trigger application deployment via CI/CD"
+    log "Application will be deployed to: https://$DOMAIN"
+
+    final_validation
 }
 
 # Run deployment
