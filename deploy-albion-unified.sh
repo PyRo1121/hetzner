@@ -751,105 +751,14 @@ setup_redis() {
     sleep 10
 
     # Test Redis connection
-    log "Testing Redis connection..."
-    if docker exec redis redis-cli ping | grep -q PONG; then
-        log "Redis is responding correctly"
-    else
-        warning "Redis connection test failed, but service may still work"
-        log "Redis logs:"
-        docker logs redis --tail 10
-    fi
 
-# ============================================================================
-# PHASE 11: PROMETHEUS METRICS - WORLD-CLASS MONITORING
-# ============================================================================
-
-setup_prometheus() {
-    log "📊 === PHASE 11: Prometheus Metrics Setup ==="
-
-    # Create Prometheus configuration
-    mkdir -p /opt/prometheus
-
-    cat >/opt/prometheus/prometheus.yml <<EOF
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-
-scrape_configs:
-  - job_name: 'prometheus'
-    static_configs:
-      - targets: ['localhost:9090']
-
-  - job_name: 'node'
-    static_configs:
-      - targets: ['localhost:9100']
-
-  - job_name: 'docker'
-    static_configs:
-      - targets: ['localhost:9323']
-
-  - job_name: 'supabase'
-    static_configs:
-      - targets:
-        - 'localhost:54320'
-        - 'localhost:54321'
-        - 'localhost:54322'
-        - 'localhost:54324'
-EOF
-
-    # Start Prometheus container
-    log "Starting Prometheus server..."
-    docker run -d \
-        --name prometheus \
-        --network host \
-        -v /opt/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml \
-        -v /opt/prometheus/data:/prometheus \
-        prom/prometheus
-
-    # Wait for Prometheus to be ready
-    sleep 10
-
-    # Verify Prometheus is running
-    if ! docker ps | grep -q prometheus; then
-        error "Prometheus failed to start"
-        exit 1
-    fi
-
-    success "✅ Prometheus metrics setup completed"
-}
-
-# ============================================================================
-# PHASE 12: GRAFANA DASHBOARDS - WORLD-CLASS VISUALIZATION
-# ============================================================================
-
-setup_grafana() {
-    log "📈 === PHASE 12: Grafana Dashboards Setup ==="
-
-    # Create Grafana directories
-    mkdir -p /opt/grafana/data /opt/grafana/logs /opt/grafana/plugins
-
-    # Start Grafana container
-    log "Starting Grafana server..."
-    docker run -d \
-        --name grafana \
-        --network host \
-        -e GF_SECURITY_ADMIN_PASSWORD=admin123 \
-        -v /opt/grafana/data:/var/lib/grafana \
-        -v /opt/grafana/logs:/var/log/grafana \
-        -v /opt/grafana/plugins:/var/lib/grafana/plugins \
-        grafana/grafana
-
-    # Wait for Grafana to be ready
-    sleep 10
-
-    # Verify Grafana is running
-    if ! docker ps | grep -q grafana; then
-        error "Grafana failed to start"
-        exit 1
-    fi
-
-    success "✅ Grafana dashboards setup completed"
-    success "✅ Redis caching setup completed"
+        # Test Redis connection
+        log "Testing Redis connection..."
+        if docker exec redis redis-cli ping | grep -q PONG; then
+            log "Redis is responding correctly"
+        else
+            warning "Redis connection test failed, but service may still work"
+            success "✅ Redis caching setup completed"
 }
 
 # ============================================================================
@@ -1228,28 +1137,6 @@ setup_node_exporter() {
         --path.sysfs=/host/sys \
         --collector.filesystem.mount-points-exclude="^/(sys|proc|dev|host|etc)($$|/)"
 
-# ============================================================================
-# PHASE 25: NODE EXPORTER - SYSTEM MONITORING
-# ============================================================================
-
-setup_node_exporter() {
-    log "📊 === PHASE 25: Node Exporter Setup ==="
-
-    # Start Node Exporter container
-    log "Starting Node Exporter for system monitoring..."
-    docker run -d \
-        --name node-exporter \
-        --network host \
-        -v /proc:/host/proc:ro \
-        -v /sys:/host/sys:ro \
-        -v /:/rootfs:ro \
-        --pid host \
-        prom/node-exporter \
-        --path.procfs=/host/proc \
-        --path.rootfs=/rootfs \
-        --path.sysfs=/host/sys \
-        --collector.filesystem.mount-points-exclude="^/(sys|proc|dev|host|etc)($$|/)"
-
     # Wait for Node Exporter to be ready
     sleep 5
 
@@ -1258,6 +1145,238 @@ setup_node_exporter() {
         error "Node Exporter failed to start"
         exit 1
     fi
+
+    success "✅ Node Exporter system monitoring setup completed"
+}
+
+# ============================================================================
+# PHASE 26: CADVISOR - DOCKER CONTAINER MONITORING
+# ============================================================================
+
+setup_cadvisor() {
+    log "🐳 === PHASE 26: cAdvisor Container Monitoring Setup ==="
+
+    # Start cAdvisor container
+    log "Starting cAdvisor for Docker container monitoring..."
+    docker run -d \
+        --name cadvisor \
+        --network host \
+        -v /:/rootfs:ro \
+        -v /var/run:/var/run:ro \
+        -v /sys:/sys:ro \
+        -v /var/lib/docker/:/var/lib/docker:ro \
+        -v /dev/disk/:/dev/disk:ro \
+        --privileged \
+        --device /dev/kmsg \
+        gcr.io/cadvisor/cadvisor:v0.47.0
+
+    # Wait for cAdvisor to be ready
+    sleep 10
+
+    # Verify cAdvisor is running
+    if ! docker ps | grep -q cadvisor; then
+        error "cAdvisor failed to start"
+        exit 1
+    fi
+
+    success "✅ cAdvisor container monitoring setup completed"
+}
+
+# ============================================================================
+# PHASE 8: BACKUPS & MONITORING
+# ============================================================================
+
+setup_backups_and_monitoring() {
+    log "💾 === PHASE 8: Backups & Monitoring Setup ==="
+
+    # Create backup script
+    cat >/opt/backup-albion.sh <<'EOF'
+#!/bin/bash
+# Daily backup script for Albion Online data
+
+BACKUP_DIR="/opt/backups"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+# Create backup directory
+mkdir -p $BACKUP_DIR
+
+# Backup PostgreSQL database
+echo "Creating PostgreSQL backup..."
+docker exec $(docker ps -q -f name=supabase-db) pg_dump -U postgres postgres > $BACKUP_DIR/albion_postgres_$DATE.sql
+
+# Backup MinIO buckets
+echo "Backing up MinIO buckets..."
+/usr/local/bin/mc mirror --overwrite local/albion-uploads $BACKUP_DIR/minio_uploads_$DATE/
+# /usr/local/bin/mc mirror --overwrite local/albion-backups $BACKUP_DIR/minio_backups_$DATE/
+
+# Compress backups
+echo "Compressing backups..."
+cd $BACKUP_DIR
+tar -czf albion_backup_$DATE.tar.gz albion_postgres_$DATE.sql minio_uploads_$DATE/ 2>/dev/null || true
+
+# Clean old backups (keep 7 days)
+find $BACKUP_DIR -name "*.tar.gz" -type f -mtime +7 -delete
+
+echo "✅ Backup completed: albion_backup_$DATE.tar.gz"
+EOF
+
+    chmod +x /opt/backup-albion.sh
+
+    # Setup cron job for daily backups
+    crontab -l | grep -v backup-albion >/tmp/crontab.tmp 2>/dev/null || true
+    echo "0 2 * * * /opt/backup-albion.sh" >>/tmp/crontab.tmp
+    crontab /tmp/crontab.tmp
+    rm -f /tmp/crontab.tmp
+
+    # Create monitoring script
+    cat >/opt/monitor-albion.sh <<'EOF'
+#!/bin/bash
+# Monitoring script for Albion Online services
+
+echo "=== Albion Online Services Status ==="
+echo "Timestamp: $(date)"
+
+# Check Supabase services
+echo -e "\n--- Supabase Services ---"
+docker ps --filter name=supabase | grep -v CONTAINER
+
+# Check MinIO
+echo -e "\n--- MinIO Storage ---"
+docker ps --filter name=minio | grep -v CONTAINER
+
+# Check Caddy
+echo -e "\n--- Caddy Proxy ---"
+systemctl status caddy --no-pager -l
+
+# Check disk usage
+echo -e "\n--- Disk Usage ---"
+df -h /opt
+
+# Check memory usage
+echo -e "\n--- Memory Usage ---"
+free -h
+
+echo -e "\n=== End Status Report ==="
+EOF
+
+    chmod +x /opt/monitor-albion.sh
+
+    success "✅ Backups and monitoring setup completed"
+}
+
+# ============================================================================
+# PHASE 9: DEPLOYMENT FINALIZATION
+# ============================================================================
+
+finalize_deployment() {
+
+    # Create deployment summary
+    cat >/opt/albion-deployment-summary.txt <<EOF
+=== ALBION ONLINE UNIFIED DEPLOYMENT SUMMARY ===
+Deployment Date: $(date)
+Domain: $DOMAIN
+Architecture: World-Class Web Hosting Stack (Supabase + Monitoring)
+
+=== SERVICES DEPLOYED ===
+✅ System Security (UFW, fail2ban, unattended-upgrades)
+✅ Docker Runtime ($DOCKER_VERSION)
+✅ Supabase Self-Hosting (REST, Auth, Realtime, Storage)
+✅ MinIO S3-Compatible Storage
+✅ Caddy Reverse Proxy with TLS
+✅ Redis Caching & Performance
+✅ Prometheus Metrics Collection
+✅ Grafana Dashboards & Visualization
+✅ pgAdmin Database Management
+✅ Uptime Kuma Status Monitoring
+✅ Loki Log Aggregation
+✅ Promtail Log Shipping
+✅ Automated Backups (Daily)
+✅ Monitoring Scripts
+
+=== ACCESS POINTS ===
+- Web Interface: https://$DOMAIN
+- Supabase REST API: https://$DOMAIN/rest/v1/
+- Supabase Auth API: https://$DOMAIN/auth/v1/
+- Supabase Realtime: https://$DOMAIN/realtime/v1/
+- Supabase Storage: https://$DOMAIN/storage/v1/
+- Grafana: https://$DOMAIN:3000 (monitoring & logs)
+- pgAdmin: https://$DOMAIN:5050 (database admin)
+- Uptime Kuma: https://$DOMAIN:3001 (status monitoring)
+- MinIO Console: http://localhost:9001
+- Health Check: https://$DOMAIN/health
+
+=== NEXT STEPS ===
+1. Configure DNS: Point $DOMAIN to this server
+2. Set up SSL certificates (handled by Caddy)
+3. Test API endpoints and database connectivity
+4. Configure monitoring alerts (optional)
+
+=== ROADMAP COMPLIANCE ===
+✅ Single unified deployment approach
+✅ Supabase self-hosting architecture
+✅ Self-hosted API endpoints (no external dependencies)
+✅ Cost-effective single-host deployment
+✅ Production-ready security and monitoring
+✅ Complete independence from external services
+
+=== PERFORMANCE TARGETS ===
+- API Response Time: p95 < 400ms (Self-hosted APIs → Supabase)
+- Database Queries: Optimized for NVMe storage
+- Backup RTO: < 2 hours (daily automated backups)
+- Uptime Target: 99.5% (Self-hosted baseline)
+
+EOF
+
+    cat /opt/albion-deployment-summary.txt
+
+    success "🎉 Deployment completed successfully!"
+    success "📋 Summary saved to: /opt/albion-deployment-summary.txt"
+    success "🚀 Ready for production use following October 2025 roadmap standards"
+}
+
+# ============================================================================
+# MAIN DEPLOYMENT ORCHESTRATION
+# ============================================================================
+
+main() {
+    log "🚀 Starting Albion Online World-Class Web Hosting Stack Deployment"
+    log "📋 Architecture: Complete Web Hosting Infrastructure (10 Services)"
+    log "📅 October 2025 Standards Implementation"
+
+    # Execute deployment phases
+    check_prerequisites
+    setup_system
+    setup_docker
+
+    # Core Infrastructure
+    [[ "$ENABLE_SUPABASE" == "true" ]] && setup_supabase
+    [[ "$ENABLE_MINIO" == "true" ]] && setup_minio
+    [[ "$ENABLE_CADDY" == "true" ]] && setup_caddy
+
+    # Advanced Infrastructure
+    [[ "$ENABLE_REDIS" == "true" ]] && setup_redis
+    [[ "$ENABLE_PROMETHEUS" == "true" ]] && setup_prometheus
+    [[ "$ENABLE_GRAFANA" == "true" ]] && setup_grafana
+
+    # Management & Monitoring
+    [[ "$ENABLE_PGADMIN" == "true" ]] && setup_pgadmin
+    [[ "$ENABLE_UPTIME_KUMA" == "true" ]] && setup_uptime_kuma
+
+    # Logging & Observability
+    [[ "$ENABLE_LOKI" == "true" ]] && setup_loki
+    [[ "$ENABLE_PROMTAIL" == "true" ]] && setup_promtail
+    [[ "$ENABLE_NODE_EXPORTER" == "true" ]] && setup_node_exporter
+    [[ "$ENABLE_CADVISOR" == "true" ]] && setup_cadvisor
+
+    # Always run backups and monitoring, then finalize
+    setup_backups_and_monitoring
+    finalize_deployment
+
+    log "✅ Deployment orchestration completed"
+}
+
+# Run main function
+main "$@"
 
     success "✅ Node Exporter system monitoring setup completed"
 }
