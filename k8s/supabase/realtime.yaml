@@ -2,10 +2,20 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: realtime
+  namespace: platform
   labels:
     app: realtime
+    app.kubernetes.io/name: realtime
+    app.kubernetes.io/version: "2025.10"
+    app.kubernetes.io/component: realtime
+    app.kubernetes.io/part-of: supabase-stack
 spec:
-  replicas: 1
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
   selector:
     matchLabels:
       app: realtime
@@ -13,55 +23,162 @@ spec:
     metadata:
       labels:
         app: realtime
+        app.kubernetes.io/name: realtime
+        app.kubernetes.io/component: realtime
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "4000"
+        prometheus.io/path: "/metrics"
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: realtime
-          image: supabase/realtime:v0.24.5
+          image: supabase/realtime:v2.30.23  # Updated to latest stable version with enhanced features
+          imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 4000
+            - name: http
+              containerPort: 4000
+              protocol: TCP
           env:
+            - name: PORT
+              value: "4000"
             - name: DB_HOST
-              value: "pgbouncer.platform.svc.cluster.local"
+              value: "pgbouncer"
             - name: DB_PORT
-              value: "6432"
-            - name: DB_NAME
-              value: "postgres"
+              value: "5432"
             - name: DB_USER
               value: "postgres"
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: supabase-secrets
-                  key: DB_PASSWORD
-            - name: PORT
-              value: "4000"
-            - name: JWT_SECRET
+                  key: POSTGRES_PASSWORD
+            - name: DB_NAME
+              value: "postgres"
+            - name: DB_SSL
+              value: "false"
+            - name: API_JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: supabase-secrets
                   key: JWT_SECRET
-            - name: ANON_KEY
+            - name: FLY_ALLOC_ID
+              value: "fly123"
+            - name: FLY_APP_NAME
+              value: "realtime"
+            - name: SECRET_KEY_BASE
               valueFrom:
                 secretKeyRef:
                   name: supabase-secrets
-                  key: ANON_KEY
+                  key: JWT_SECRET
+            - name: ERL_AFLAGS
+              value: "-proto_dist inet_tcp"
+            - name: ENABLE_TAILSCALE
+              value: "false"
+            - name: DNS_NODES
+              value: "''"
+            - name: LOG_LEVEL
+              value: "info"
+            - name: DB_ENC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: supabase-secrets
+                  key: JWT_SECRET
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # Realtime needs write access for temp files
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "300m"
+            limits:
+              memory: "2Gi"
+              cpu: "1500m"
           readinessProbe:
             httpGet:
-              path: /socket
+              path: /socket/websocket
               port: 4000
-            initialDelaySeconds: 10
+              scheme: HTTP
+              httpHeaders:
+                - name: Connection
+                  value: Upgrade
+                - name: Upgrade
+                  value: websocket
+            initialDelaySeconds: 15
             periodSeconds: 10
+            timeoutSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /socket/websocket
+              port: 4000
+              scheme: HTTP
+              httpHeaders:
+                - name: Connection
+                  value: Upgrade
+                - name: Upgrade
+                  value: websocket
+            initialDelaySeconds: 45
+            periodSeconds: 30
+            timeoutSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: realtime-data
+              mountPath: /app/data
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: realtime-data
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - realtime
+                topologyKey: kubernetes.io/hostname
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: realtime
+  namespace: platform
   labels:
     app: realtime
+    app.kubernetes.io/name: realtime
+    app.kubernetes.io/component: realtime
+    app.kubernetes.io/part-of: supabase-stack
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "4000"
+    prometheus.io/path: "/metrics"
 spec:
+  type: ClusterIP
   selector:
     app: realtime
   ports:
     - name: http
       port: 4000
       targetPort: 4000
+      protocol: TCP

@@ -2,10 +2,20 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: gotrue
+  namespace: platform
   labels:
     app: gotrue
+    app.kubernetes.io/name: gotrue
+    app.kubernetes.io/version: "2025.10"
+    app.kubernetes.io/component: auth
+    app.kubernetes.io/part-of: supabase-stack
 spec:
-  replicas: 1
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
   selector:
     matchLabels:
       app: gotrue
@@ -13,12 +23,28 @@ spec:
     metadata:
       labels:
         app: gotrue
+        app.kubernetes.io/name: gotrue
+        app.kubernetes.io/component: auth
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9999"
+        prometheus.io/path: "/metrics"
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: gotrue
-          image: supabase/gotrue:v2.76.13
+          image: supabase/gotrue:v2.158.1  # Updated to latest stable version
+          imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 9999
+            - name: http
+              containerPort: 9999
+              protocol: TCP
           env:
             - name: GOTRUE_API_HOST
               value: "0.0.0.0"
@@ -44,23 +70,87 @@ spec:
               value: "false"
             - name: GOTRUE_EXTERNAL_EMAIL_ENABLED
               value: "false"
+            - name: GOTRUE_LOG_LEVEL
+              value: "info"
+            - name: GOTRUE_RATE_LIMIT_HEADER
+              value: "X-RateLimit-Limit"
+            - name: GOTRUE_RATE_LIMIT_EMAIL_SENT
+              value: "30"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
           readinessProbe:
             httpGet:
               path: /health
               port: 9999
+              scheme: HTTP
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9999
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - gotrue
+                topologyKey: kubernetes.io/hostname
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: gotrue
+  namespace: platform
   labels:
     app: gotrue
+    app.kubernetes.io/name: gotrue
+    app.kubernetes.io/component: auth
+    app.kubernetes.io/part-of: supabase-stack
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9999"
+    prometheus.io/path: "/metrics"
 spec:
+  type: ClusterIP
   selector:
     app: gotrue
   ports:
     - name: http
       port: 9999
       targetPort: 9999
+      protocol: TCP

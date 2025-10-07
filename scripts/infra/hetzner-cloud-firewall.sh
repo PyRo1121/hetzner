@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Configure Hetzner Cloud Firewall for a Supabase + Workers PoC
+# Configure Hetzner Cloud Firewall for a Supabase + Workers PoC - October 2025 Enhanced Version
 # This can be run on any Linux host with internet access (including the server).
 #
 # Requirements:
 # - Hetzner Cloud API token with permission to manage firewalls and servers
 # - Server ID or name to attach the firewall to
+# - jq (for JSON parsing)
+# - hcloud CLI v1.53.0+ (optional, with fallback to REST API)
 #
 # Usage examples:
 #   HCLOUD_TOKEN=xxxx SERVER_NAME=my-server bash hetzner-cloud-firewall.sh
@@ -15,11 +17,32 @@
 #   IP_ALLOWLIST_SSH         Comma-separated list of CIDRs for SSH (default: 0.0.0.0/0)
 #   ALLOW_MINIO_CONSOLE      true to allow TCP 9001 from 0.0.0.0/0 (default: false)
 #   ALLOW_STUDIO             true to allow TCP 3000 from 0.0.0.0/0 (default: false)
+#   ENABLE_MONITORING        true to enable monitoring ports (default: true)
+#   ENABLE_RATE_LIMITING     true to enable rate limiting rules (default: true)
+#   DEBUG                    true to enable debug logging (default: false)
 
 set -euo pipefail
 
-log() { echo "[hcloud-fw] $*"; }
-err() { echo "[hcloud-fw:ERROR] $*" >&2; }
+# Script metadata
+readonly SCRIPT_VERSION="2.0.0"
+readonly SCRIPT_NAME="hetzner-cloud-firewall"
+
+# Enhanced color codes for output
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly PURPLE='\033[0;35m'
+readonly CYAN='\033[0;36m'
+readonly WHITE='\033[1;37m'
+readonly NC='\033[0m' # No Color
+
+# Enhanced logging functions with timestamps
+log() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] [hcloud-fw]${NC} $*"; }
+err() { echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] [hcloud-fw:ERROR]${NC} $*" >&2; }
+warn() { echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] [hcloud-fw:WARN]${NC} $*" >&2; }
+success() { echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] [hcloud-fw:SUCCESS]${NC} $*"; }
+debug() { [[ "${DEBUG:-false}" == "true" ]] && echo -e "${CYAN}[$(date +'%Y-%m-%d %H:%M:%S')] [hcloud-fw:DEBUG]${NC} $*" >&2 || true; }
 
 # Prefer /usr/local/bin over system paths (sudo may prioritize /usr/bin)
 export PATH="/usr/local/bin:$PATH"
