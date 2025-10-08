@@ -1,0 +1,379 @@
+# ============================================================================
+# NEXT.JS 15 DEPLOYMENT FOR K3S - OCTOBER 2025
+# ============================================================================
+# Production-ready Next.js deployment with:
+# - Horizontal Pod Autoscaler (HPA) for traffic spikes
+# - Valkey integration for caching
+# - PostgreSQL 17 connection
+# - Qdrant vector search
+# - Ollama Phi-4 AI integration
+# - TLS with Let's Encrypt
+# - Resource optimization
+#
+# Apply with: kubectl apply -f nextjs-k3s-deployment.yaml
+# ============================================================================
+
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nextjs-app
+
+---
+# ConfigMap for environment variables
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nextjs-config
+  namespace: nextjs-app
+data:
+  NODE_ENV: "production"
+  # Database connections
+  DATABASE_URL: "postgresql://postgres:password@postgresql.databases.svc.cluster.local:5432/albion"
+  PGBOUNCER_URL: "postgresql://postgres:password@pgbouncer.databases.svc.cluster.local:6432/albion"
+  # Valkey (Redis replacement)
+  REDIS_URL: "redis://valkey.databases.svc.cluster.local:6379"
+  VALKEY_URL: "valkey://valkey-0.valkey.databases.svc.cluster.local:6379"
+  # Vector database
+  QDRANT_URL: "http://qdrant.databases.svc.cluster.local:6333"
+  # AI/ML
+  OLLAMA_URL: "http://ollama.ai-ml.svc.cluster.local:11434"
+  # Object storage
+  MINIO_ENDPOINT: "minio.databases.svc.cluster.local:9000"
+  MINIO_USE_SSL: "false"
+  # Next.js optimization
+  NEXT_TELEMETRY_DISABLED: "1"
+
+---
+# Secret for sensitive data (replace with actual values)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nextjs-secrets
+  namespace: nextjs-app
+type: Opaque
+stringData:
+  DATABASE_PASSWORD: "your-postgres-password"
+  MINIO_ACCESS_KEY: "minioadmin"
+  MINIO_SECRET_KEY: "your-minio-password"
+  NEXTAUTH_SECRET: "your-nextauth-secret"
+
+---
+# Next.js Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nextjs-app
+  namespace: nextjs-app
+  labels:
+    app: nextjs
+    version: "1.0.0"
+spec:
+  replicas: 3  # Start with 3, HPA will scale 2-20
+  selector:
+    matchLabels:
+      app: nextjs
+  template:
+    metadata:
+      labels:
+        app: nextjs
+        version: "1.0.0"
+    spec:
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      
+      containers:
+      - name: nextjs
+        image: your-registry/nextjs-app:latest  # Replace with your image
+        imagePullPolicy: Always
+        
+        ports:
+        - name: http
+          containerPort: 3000
+          protocol: TCP
+        
+        # Environment variables
+        envFrom:
+        - configMapRef:
+            name: nextjs-config
+        - secretRef:
+            name: nextjs-secrets
+        
+        # Resource limits (for HPA)
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        
+        # Startup probe for slow starts
+        startupProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 0
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 30
+        
+        # Security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false  # Next.js needs write access for .next
+          capabilities:
+            drop:
+            - ALL
+
+---
+# Service for Next.js
+apiVersion: v1
+kind: Service
+metadata:
+  name: nextjs-service
+  namespace: nextjs-app
+  labels:
+    app: nextjs
+spec:
+  type: ClusterIP
+  selector:
+    app: nextjs
+  ports:
+  - name: http
+    port: 80
+    targetPort: 3000
+    protocol: TCP
+
+---
+# Horizontal Pod Autoscaler (HPA) - ESSENTIAL for Next.js 15
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nextjs-hpa
+  namespace: nextjs-app
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nextjs-app
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+  # Scale based on CPU (primary metric)
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  # Scale based on memory (secondary)
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5 min before scaling down
+      policies:
+      - type: Percent
+        value: 50  # Scale down max 50% at a time
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0  # Scale up immediately
+      policies:
+      - type: Percent
+        value: 100  # Double pods if needed
+        periodSeconds: 30
+      - type: Pods
+        value: 4  # Or add 4 pods
+        periodSeconds: 30
+      selectPolicy: Max  # Use the highest value
+
+---
+# Ingress with TLS (Traefik + Let's Encrypt)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nextjs-ingress
+  namespace: nextjs-app
+  annotations:
+    # Traefik annotations
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    # cert-manager annotations
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Performance annotations
+    traefik.ingress.kubernetes.io/router.middlewares: nextjs-app-compress@kubernetescrd,nextjs-app-ratelimit@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+  - hosts:
+    - your-domain.com  # Replace with your domain
+    - www.your-domain.com
+    secretName: nextjs-tls-cert
+  rules:
+  - host: your-domain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nextjs-service
+            port:
+              number: 80
+  - host: www.your-domain.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nextjs-service
+            port:
+              number: 80
+
+---
+# Traefik Middleware: Compression
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: compress
+  namespace: nextjs-app
+spec:
+  compress: {}
+
+---
+# Traefik Middleware: Rate Limiting
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: ratelimit
+  namespace: nextjs-app
+spec:
+  rateLimit:
+    average: 100  # 100 requests per second
+    burst: 50
+    period: 1s
+
+---
+# PodDisruptionBudget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nextjs-pdb
+  namespace: nextjs-app
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: nextjs
+
+---
+# NetworkPolicy for security (allow only necessary traffic)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nextjs-network-policy
+  namespace: nextjs-app
+spec:
+  podSelector:
+    matchLabels:
+      app: nextjs
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from Traefik ingress
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: traefik
+    ports:
+    - protocol: TCP
+      port: 3000
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow PostgreSQL
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: databases
+    - podSelector:
+        matchLabels:
+          app: postgresql
+    ports:
+    - protocol: TCP
+      port: 5432
+  # Allow Valkey
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: databases
+    - podSelector:
+        matchLabels:
+          app: valkey
+    ports:
+    - protocol: TCP
+      port: 6379
+  # Allow Qdrant
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: databases
+    - podSelector:
+        matchLabels:
+          app: qdrant
+    ports:
+    - protocol: TCP
+      port: 6333
+  # Allow Ollama
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: ai-ml
+    - podSelector:
+        matchLabels:
+          app: ollama
+    ports:
+    - protocol: TCP
+      port: 11434
+  # Allow all outbound HTTPS (for external APIs)
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443

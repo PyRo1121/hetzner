@@ -157,27 +157,82 @@ check_prerequisites() {
 setup_system() {
     log "🔧 === PHASE 1: System Setup ==="
 
-    retry_with_backoff 3 5 "apt-get update -y"
-    retry_with_backoff 3 5 "apt-get upgrade -y"
-    retry_with_backoff 3 5 "apt-get autoremove -y"
+    # Update system packages
+    log "Updating system packages..."
+    retry_with_backoff 3 5 /usr/bin/apt-get update -y
+    retry_with_backoff 3 5 /usr/bin/apt-get upgrade -y
+    retry_with_backoff 3 5 /usr/bin/apt-get autoremove -y
 
-    retry_with_backoff 3 5 "apt-get install -y \
+    # Install essential packages
+    log "Installing essential packages..."
+    retry_with_backoff 3 5 /usr/bin/apt-get install -y \
         ufw fail2ban unattended-upgrades apt-transport-https \
-        ca-certificates curl wget jq unzip htop iotop ncdu git openssl \
-        containerd.io build-essential python3 python3-pip"
+        ca-certificates curl wget jq unzip htop iotop ncdu \
+        git openssl
 
-    # UFW: Tighten for k3s
+    # Configure UFW firewall - CRITICAL: SSH MUST BE ALLOWED FIRST
+    log "Configuring UFW firewall (SSH-safe)..."
+    log "⚠️  CRITICAL: Allowing SSH BEFORE enabling firewall to prevent lockout"
+    
+    # Disable UFW first to prevent any conflicts
+    ufw --force disable
+    
+    # Reset and configure rules BEFORE enabling
     ufw --force reset
     ufw default deny incoming
     ufw default allow outgoing
-    ufw allow ssh
-    ufw allow 80/tcp
-    ufw allow 443/tcp
-    ufw allow 6443/tcp
-    ufw limit ssh
-    echo "y" | ufw enable
 
-    # Unattended upgrades
+    # CRITICAL: Allow SSH FIRST with rate limiting
+    log "✅ Step 1: Allowing SSH (port 22) with rate limiting..."
+    ufw allow 22/tcp
+    ufw limit 22/tcp
+    
+    # Allow essential web services
+    log "✅ Step 2: Allowing HTTP/HTTPS..."
+    ufw allow 80/tcp   # HTTP for Caddy
+    ufw allow 443/tcp  # HTTPS for Caddy
+    
+    # Allow Supabase API ports
+    log "✅ Step 3: Allowing Supabase services..."
+    ufw allow 54321/tcp # Supabase REST API
+    ufw allow 54322/tcp # Supabase Auth API
+    ufw allow 54323/tcp # Supabase Realtime API
+    ufw allow 54324/tcp # Supabase Storage API
+
+    # Show configured rules before enabling
+    log "📋 Firewall rules configured:"
+    ufw show added
+    
+    # Enable UFW with confirmation
+    log "✅ Step 4: Enabling firewall (SSH is already allowed)..."
+    echo "y" | ufw enable
+    
+    # Verify SSH is allowed
+    log "🔍 Verifying SSH access is allowed..."
+    if ufw status | grep -q "22.*ALLOW"; then
+        success "✅ SSH access confirmed in firewall rules"
+    else
+        error "❌ CRITICAL: SSH not found in firewall rules! Disabling firewall for safety..."
+        ufw --force disable
+        exit 1
+    fi
+
+    # Configure fail2ban for SSH protection
+    log "Configuring fail2ban for SSH protection..."
+    cat >/etc/fail2ban/jail.local <<EOF
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 5
+bantime = 3600
+findtime = 600
+EOF
+    systemctl enable --now fail2ban
+
+    # Configure automatic security updates
+    log "Configuring automatic security updates..."
     cat >/etc/apt/apt.conf.d/50unattended-upgrades <<EOF
 Unattended-Upgrade::Allowed-Origins {
     "\${distro_id}:\${distro_codename}";
