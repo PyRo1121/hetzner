@@ -102,7 +102,7 @@ retry_with_backoff() {
 # Health wait for k8s resources
 wait_for_health() {
     local resource=$1 namespace=${2:-albion-stack}
-    retry_with_backoff 30 10 "k3s kubectl wait --for=condition=ready $resource -n $namespace --timeout=60s"
+    retry_with_backoff 30 10 "k3s kubectl wait --for=condition=ready $resource -n $namespace --timeout=300s"
     success "$resource is healthy"
 }
 
@@ -368,14 +368,41 @@ server:
   - --insecure
   resources:
     requests:
-      cpu: 250m
-      memory: 64Mi
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+  readinessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 10
+  livenessProbe:
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 5
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
     limits:
       cpu: 500m
+      memory: 256Mi
+repoServer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
       memory: 128Mi
 configs:
   params:
-  - server.insecure=true
+    create: true
+    server.insecure: true
   rbacConfig: |
     policy.default: role:readonly
 repoAccess:
@@ -475,7 +502,7 @@ auth:
   jwtSecret: ${SUPABASE_JWT_SECRET:-default-jwt-secret}
 postgres:
   password: ${POSTGRES_PASSWORD}
-  pgVersion: "16"
+  pgVersion: "17"
 kong:
   enabled: true
 storage:
@@ -491,6 +518,10 @@ EOF
         log "✅ Supabase already installed"
     fi
 
+    # Wait for Supabase PostgreSQL statefulset to be ready
+    wait_for_health "statefulset/supabase-postgresql"
+
+    # Also wait for postgres pods to be ready
     wait_for_health "pod -l app.kubernetes.io/name=postgres"
 
     success "✅ Supabase deployed"
