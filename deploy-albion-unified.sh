@@ -553,10 +553,23 @@ setup_supabase() {
     [[ "$ENABLE_SUPABASE" != "true" ]] && return
     log "🐘 === PHASE 4: Supabase (Helm ${SUPABASE_HELM_VERSION}) ==="
 
-    helm repo add supabase https://supabase-community.github.io/supabase-kubernetes 2>/dev/null || true
+    # Remove any existing supabase repo to avoid conflicts
+    helm repo remove supabase 2>/dev/null || true
+    
+    # Add the correct community repository
+    helm repo add supabase https://supabase-community.github.io/supabase-kubernetes
     helm repo update
+    
+    # Verify the repository is accessible
+    if ! helm search repo supabase/supabase >/dev/null 2>&1; then
+        log "❌ Failed to find Supabase chart in repository"
+        log "Available charts:"
+        helm search repo supabase || true
+        return 1
+    fi
 
     cat > /tmp/supabase-values.yaml << EOF
+# Supabase Kubernetes Configuration with Latest 2024 Images
 global:
   domain: ${DOMAIN:-localhost}
   # Enhanced security for 2025 standards
@@ -564,63 +577,85 @@ global:
     runAsNonRoot: true
     runAsUser: 999
     fsGroup: 999
-auth:
-  jwtSecret: ${SUPABASE_JWT_SECRET:-default-jwt-secret}
-  # Enhanced JWT configuration for 2025
-  jwtExpiry: 3600
-  refreshTokenRotationEnabled: true
-postgres:
-  password: ${POSTGRES_PASSWORD}
-  # PostgreSQL 17 with enhanced security
-  version: "${POSTGRES_VERSION}"
+
+# Database configuration
+db:
+  enabled: true
   image:
-    tag: "${POSTGRES_VERSION}-alpine"
-  # Security hardening
-  securityContext:
-    runAsUser: 70
-    runAsGroup: 70
-    fsGroup: 70
-    runAsNonRoot: true
-  containerSecurityContext:
-    runAsUser: 70
-    runAsNonRoot: true
-    readOnlyRootFilesystem: false
-    allowPrivilegeEscalation: false
-    capabilities:
-      drop:
-      - ALL
-      add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - FOWNER
-      - SETGID
-      - SETUID
-  # Enhanced PostgreSQL configuration for 2025
-  postgresql:
-    postgresqlConfiguration:
-      shared_preload_libraries: 'pg_stat_statements,pg_cron,timescaledb'
-      max_connections: '200'
-      shared_buffers: '256MB'
-      effective_cache_size: '1GB'
-      maintenance_work_mem: '64MB'
-      checkpoint_completion_target: '0.9'
-      wal_buffers: '16MB'
-      default_statistics_target: '100'
-      random_page_cost: '1.1'
-      effective_io_concurrency: '200'
-      work_mem: '4MB'
-      min_wal_size: '1GB'
-      max_wal_size: '4GB'
-      # Security settings
-      ssl: 'on'
-      log_statement: 'all'
-      log_min_duration_statement: '1000'
+    repository: supabase/postgres
+    tag: "17.4.1.014"  # Latest stable Supabase Postgres
+    pullPolicy: IfNotPresent
+  auth:
+    username: postgres
+    password: ${POSTGRES_PASSWORD}
+    database: postgres
   persistence:
     enabled: true
     size: 20Gi
     storageClass: "longhorn"
+
+# Auth service (GoTrue)
+auth:
+  enabled: true
+  image:
+    repository: supabase/gotrue
+    tag: "v2.165.0"  # Latest stable version
+    pullPolicy: IfNotPresent
+  environment:
+    GOTRUE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-default-jwt-secret}
+    GOTRUE_JWT_EXP: 3600
+    GOTRUE_REFRESH_TOKEN_ROTATION_ENABLED: "true"
+    GOTRUE_SITE_URL: https://${DOMAIN}
+    GOTRUE_URI_ALLOW_LIST: "https://${DOMAIN}/*"
+
+# REST API (PostgREST)
+rest:
+  enabled: true
+  image:
+    repository: postgrest/postgrest
+    tag: "v12.2.3"  # Latest stable version
+    pullPolicy: IfNotPresent
+  environment:
+    PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET:-default-jwt-secret}
+    PGRST_DB_SCHEMA: "public,storage,graphql_public"
+    PGRST_DB_ANON_ROLE: "anon"
+
+# Realtime service
+realtime:
+  enabled: true
+  image:
+    repository: supabase/realtime
+    tag: "v2.30.23"  # Latest stable version
+    pullPolicy: IfNotPresent
+  environment:
+    DB_HOST: supabase-db
+    DB_PORT: "5432"
+    DB_USER: supabase_admin
+    DB_PASSWORD: ${POSTGRES_PASSWORD}
+    DB_NAME: postgres
+    SECRET_KEY_BASE: ${SUPABASE_JWT_SECRET:-default-jwt-secret}
+
+# Storage service
+storage:
+  enabled: true
+  image:
+    repository: supabase/storage-api
+    tag: "v1.11.9"  # Latest stable version
+    pullPolicy: IfNotPresent
+  environment:
+    ANON_KEY: ${SUPABASE_ANON_KEY:-default-anon-key}
+    SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-default-service-key}
+    POSTGREST_URL: http://supabase-rest:3000
+    PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET:-default-jwt-secret}
+    DATABASE_URL: postgresql://supabase_storage_admin:${POSTGRES_PASSWORD}@supabase-db:5432/postgres
+
+# Kong API Gateway
 kong:
   enabled: true
+  image:
+    repository: kong
+    tag: "3.8.0-alpine"  # Latest stable Kong
+    pullPolicy: IfNotPresent
   # Security hardening for Kong
   securityContext:
     runAsUser: 1000
@@ -635,15 +670,43 @@ kong:
     capabilities:
       drop:
       - ALL
-storage:
-  anonKey: ${SUPABASE_ANON_KEY:-default-anon-key}
-  serviceRoleKey: ${SUPABASE_SERVICE_ROLE_KEY:-default-service-key}
-  # Enhanced storage security
-  securityContext:
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
-    runAsNonRoot: true
+
+# Studio (Dashboard)
+studio:
+  enabled: true
+  image:
+    repository: supabase/studio
+    tag: "20241029-46e1e40"  # Latest stable Studio version
+    pullPolicy: IfNotPresent
+  environment:
+    STUDIO_PG_META_URL: http://supabase-meta:8080
+    SUPABASE_URL: https://${DOMAIN}
+    SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-default-anon-key}
+
+# Meta service
+meta:
+  enabled: true
+  image:
+    repository: supabase/postgres-meta
+    tag: "v0.84.2"  # Latest stable version
+    pullPolicy: IfNotPresent
+
+# Analytics (Logflare)
+analytics:
+  enabled: true
+  image:
+    repository: supabase/logflare
+    tag: "1.4.0"  # Latest stable version
+    pullPolicy: IfNotPresent
+
+# Edge Functions
+functions:
+  enabled: true
+  image:
+    repository: supabase/edge-runtime
+    tag: "v1.58.2"  # Latest stable version
+    pullPolicy: IfNotPresent
+
 # Network policies for enhanced security
 networkPolicy:
   enabled: true
@@ -653,6 +716,7 @@ networkPolicy:
     - namespaceSelector:
         matchLabels:
           name: albion-stack
+
 # Resource limits for better performance
 resources:
   requests:
@@ -661,10 +725,30 @@ resources:
   limits:
     memory: "2Gi"
     cpu: "1000m"
+
+# Security context for all services
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  fsGroup: 999
+  
+# JWT Configuration
+secret:
+  jwt:
+    secret: ${SUPABASE_JWT_SECRET:-default-jwt-secret}
+    anonKey: ${SUPABASE_ANON_KEY:-default-anon-key}
+    serviceKey: ${SUPABASE_SERVICE_ROLE_KEY:-default-service-key}
+  db:
+    username: postgres
+    password: ${POSTGRES_PASSWORD}
+    database: postgres
+  dashboard:
+    username: supabase
+    password: ${SUPABASE_DASHBOARD_PASSWORD:-this_password_is_insecure_and_should_be_updated}
 EOF
 
     if ! helm list -n albion-stack | grep -q supabase; then
-        helm upgrade --install supabase supabase/supabase --namespace albion-stack \
+        helm upgrade --install supabase supabase-community/supabase --namespace albion-stack \
           -f /tmp/supabase-values.yaml \
           --version ${SUPABASE_HELM_VERSION} \
           --set global.database.existingSecret=app-secrets --wait --timeout=15m
