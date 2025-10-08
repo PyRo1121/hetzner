@@ -557,7 +557,7 @@ setup_supabase() {
     helm repo remove supabase 2>/dev/null || true
     
     # Add the correct community repository
-    helm repo add supabase https://supabase-community.github.io/supabase-kubernetes
+    helm repo add supabase https://supabase.github.io/helm-charts
     helm repo update
     
     # Verify the repository is accessible
