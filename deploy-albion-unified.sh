@@ -106,7 +106,7 @@ retry_with_backoff() {
 wait_for_health() {
     local resource=$1 namespace=${2:-albion-stack}
     local condition="ready"
-    
+
     # Use appropriate condition based on resource type
     if [[ $resource == deployment/* ]]; then
         condition="available"
@@ -115,7 +115,7 @@ wait_for_health() {
     elif [[ $resource == pods* ]]; then
         condition="ready"
     fi
-    
+
     retry_with_backoff 30 10 "k3s kubectl wait --for=condition=$condition $resource -n $namespace --timeout=300s"
     success "$resource is healthy"
 }
@@ -553,7 +553,7 @@ setup_supabase() {
     [[ "$ENABLE_SUPABASE" != "true" ]] && return
     log "🐘 === PHASE 4: Supabase (Helm ${SUPABASE_HELM_VERSION}) ==="
 
-    helm repo add supabase https://supabase.github.io/charts 2>/dev/null || true
+    helm repo add supabase https://supabase-community.github.io/supabase-kubernetes 2>/dev/null || true
     helm repo update
 
     cat > /tmp/supabase-values.yaml << EOF
@@ -1302,10 +1302,10 @@ for image in $IMAGES; do
     if [[ "$image" != *"pause"* ]] && [[ "$image" != *"coredns"* ]]; then
         log "Generating SBOM for: $image"
         image_name=$(echo "$image" | tr '/' '_' | tr ':' '_')
-        
+
         # Generate SBOM using Trivy
         trivy image --format spdx-json --output "/opt/sboms/${image_name}.spdx.json" "$image" 2>/dev/null || log "Failed to generate SBOM for $image"
-        
+
         # Scan for vulnerabilities
         trivy image --format json --output "/opt/sboms/${image_name}.vuln.json" "$image" 2>/dev/null || log "Failed to scan vulnerabilities for $image"
     fi
@@ -1335,7 +1335,7 @@ CRITICAL_IMAGES=(
 
 for image in "${CRITICAL_IMAGES[@]}"; do
     log "Verifying signature for: $image"
-    
+
     # Check if image has signature (this is a placeholder - actual implementation depends on your signing setup)
     if cosign verify --certificate-identity-regexp ".*" --certificate-oidc-issuer-regexp ".*" "$image" 2>/dev/null; then
         log "✅ Signature verified for $image"
