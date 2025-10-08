@@ -105,7 +105,18 @@ retry_with_backoff() {
 # Health wait for k8s resources
 wait_for_health() {
     local resource=$1 namespace=${2:-albion-stack}
-    retry_with_backoff 30 10 "k3s kubectl wait --for=condition=ready $resource -n $namespace --timeout=300s"
+    local condition="ready"
+    
+    # Use appropriate condition based on resource type
+    if [[ $resource == deployment/* ]]; then
+        condition="available"
+    elif [[ $resource == statefulset/* ]]; then
+        condition="ready"
+    elif [[ $resource == pods* ]]; then
+        condition="ready"
+    fi
+    
+    retry_with_backoff 30 10 "k3s kubectl wait --for=condition=$condition $resource -n $namespace --timeout=300s"
     success "$resource is healthy"
 }
 
@@ -665,7 +676,7 @@ EOF
     wait_for_health "statefulset/supabase-postgresql"
 
     # Also wait for postgres pods to be ready
-    wait_for_health "pod -l app.kubernetes.io/name=postgres"
+    wait_for_health "pods -l app.kubernetes.io/name=postgres"
 
     success "✅ Supabase deployed with PostgreSQL ${POSTGRES_VERSION}"
 }
