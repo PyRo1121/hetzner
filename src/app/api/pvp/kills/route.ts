@@ -1,6 +1,7 @@
 /**
  * Live PvP Kills API Route
  * Proxies Gameinfo events with validation, timeout, and rate limiting.
+ * PRODUCTION: Cache-first architecture with Redis
  */
 
 import { NextResponse } from 'next/server';
@@ -8,6 +9,8 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { RATE_LIMITS, rateLimiter } from '@/lib/cache/rate-limiter';
+import { CACHE_CONFIG } from '@/lib/config/production';
+import { cacheService } from '@/lib/redis/client';
 
 const BASE_URLS = {
   Americas: 'https://gameinfo.albiononline.com/api/gameinfo',
@@ -61,6 +64,24 @@ export async function GET(request: Request) {
         ? parsed.data.server
         : 'Americas';
 
+    // Create cache key
+    const cacheKey = `pvp:kills:${server}:${limit}:${offset}:${guildId ?? 'all'}`;
+
+    // PRODUCTION: Check Redis cache first (short TTL for real-time data)
+    const cached = await cacheService.get<any>(cacheKey);
+    if (cached) {
+      return NextResponse.json(
+        { success: true, data: cached, cached: true },
+        {
+          headers: {
+            'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
+            'X-Source-Server': server,
+            'X-Cache': 'HIT',
+          },
+        }
+      );
+    }
+
     // Route-specific rate limiting using GAMEINFO bucket
     const allowed = await rateLimiter.tryConsume('route:/api/pvp/kills', 1, RATE_LIMITS.GAMEINFO);
     if (!allowed) {
@@ -99,13 +120,17 @@ export async function GET(request: Request) {
 
     const data = await res.json();
 
+    // Store in Redis cache (short TTL for real-time data)
+    await cacheService.set(cacheKey, data, CACHE_CONFIG.killsTTL);
+
     return NextResponse.json(
-      { success: true, data },
+      { success: true, data, cached: false },
       {
         headers: {
           // Very short cache to smooth intermittent spikes without staling live feed
           'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=15',
           'X-Source-Server': server,
+          'X-Cache': 'MISS',
         },
       }
     );

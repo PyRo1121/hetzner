@@ -23,6 +23,11 @@ const nextConfig = {
   // Enable standalone output for Docker deployment
   output: 'standalone',
 
+  // Redis cache handler for horizontal scaling (Kubernetes)
+  cacheHandler: process.env.NODE_ENV === 'production' 
+    ? require.resolve('./cache-handler.cjs') 
+    : undefined,
+
   // Allow dev origins for HMR
   allowedDevOrigins: ['10.133.134.10'],
   

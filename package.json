@@ -16,6 +16,8 @@
     "test:items": "bun run scripts/test-items-loader.ts"
   },
   "dependencies": {
+    "@neshca/cache-handler": "^1.7.2",
+    "redis": "^4.7.0",
     "@apollo/server": "^5.0.0",
     "@as-integrations/next": "^4.0.0",
     "@builder.io/partytown": "^0.10.3",

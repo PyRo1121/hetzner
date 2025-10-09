@@ -8,14 +8,53 @@ const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
 const Redis = require('ioredis');
 
+// Detect environment
+const isKubernetes = process.env.KUBERNETES_SERVICE_HOST !== undefined;
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Get service URLs based on environment
+function getServiceUrl(service) {
+  if (isKubernetes || isProduction) {
+    const urls = {
+      supabase: 'http://postgresql.databases.svc.cluster.local:5432',
+      redis: process.env.REDIS_PASSWORD 
+        ? `redis://:${process.env.REDIS_PASSWORD}@redis-master.databases.svc.cluster.local:6379`
+        : 'redis://redis-master.databases.svc.cluster.local:6379',
+    };
+    return urls[service];
+  }
+  
+  // Development defaults
+  const urls = {
+    supabase: 'http://localhost:54321',
+    redis: 'redis://localhost:6379',
+  };
+  return urls[service];
+}
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.SUPABASE_URL || getServiceUrl('supabase'),
+  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+);
+
+// Initialize Redis client with retry logic
+const redis = new Redis(process.env.REDIS_URL || getServiceUrl('redis'), {
+  retryStrategy: (times) => {
+    if (times > 10) {
+      console.error('❌ Redis: Max retries reached');
+      return null;
+    }
+    return Math.min(times * 100, 3000);
+  },
+  maxRetriesPerRequest: 3,
+  enableReadyCheck: true,
+});
+
 class DataIngestionService {
   constructor() {
-    this.supabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
-    );
-
-    this.redis = new Redis(process.env.REDIS_URL);
+    this.supabase = supabase;
+    this.redis = redis;
 
     this.apis = {
       gameinfo: {
