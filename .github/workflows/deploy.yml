@@ -1,0 +1,82 @@
+name: Build and Deploy to K3s
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NEXT_PUBLIC_SENTRY_DSN=${{ secrets.NEXT_PUBLIC_SENTRY_DSN }}
+            SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
+            REDIS_URL=${{ secrets.REDIS_URL }}
+            GAMEINFO_BASE_URL=${{ secrets.GAMEINFO_BASE_URL }}
+            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+            S3_ENDPOINT=${{ secrets.S3_ENDPOINT }}
+            S3_ACCESS_KEY=${{ secrets.S3_ACCESS_KEY }}
+            S3_SECRET_KEY=${{ secrets.S3_SECRET_KEY }}
+
+      - name: Deploy to K3s
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        env:
+          KUBECONFIG_DATA: ${{ secrets.KUBECONFIG }}
+        run: |
+          echo "Image built and pushed successfully!"
+          echo "Latest image: ghcr.io/${{ github.repository }}:latest"
+          
+          # Optional: Auto-deploy if KUBECONFIG secret is set
+          if [ -n "$KUBECONFIG_DATA" ]; then
+            echo "$KUBECONFIG_DATA" | base64 -d > /tmp/kubeconfig
+            export KUBECONFIG=/tmp/kubeconfig
+            kubectl set image deployment/nextjs-app nextjs=ghcr.io/${{ github.repository }}:latest -n nextjs
+            kubectl set image deployment/admin-backend admin=ghcr.io/${{ github.repository }}:latest -n admin
+            kubectl rollout status deployment/nextjs-app -n nextjs --timeout=5m
+            echo "✅ Deployment complete!"
+          else
+            echo "⚠️  KUBECONFIG secret not set. Manual deployment required:"
+            echo "kubectl set image deployment/nextjs-app nextjs=ghcr.io/${{ github.repository }}:latest -n nextjs"
+          fi
