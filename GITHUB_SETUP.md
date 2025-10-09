@@ -15,16 +15,23 @@ Add these secrets:
 
 ### Required for Build:
 ```
+# Sentry (optional - for error tracking)
 NEXT_PUBLIC_SENTRY_DSN=https://e128b83fbb7e9c3f8fd97705b289e55f@o970025.ingest.us.sentry.io/4508842398384128
 SENTRY_AUTH_TOKEN=b1764404ee4111efa447166616ac1d1f
-REDIS_URL=redis://default:ld2SuNFmezD5Je8U9clCNMmMCSTlPRJf@redis-13404.c309.us-east-2-1.ec2.redns.redis-cloud.com:13404
-GAMEINFO_BASE_URL=https://gameinfo.albiononline.com/api/gameinfo
-SUPABASE_URL=https://oamrxxzpehglcghfergh.supabase.co
-SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hbXJ4eHpwZWhnbGNnaGZlcmdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkyNjA3ODAsImV4cCI6MjA3NDgzNjc4MH0.-A5f8qiwu3nOxVjfgoJLsj9bUtxj50JN--b4rKPizwI
+
+# PostgreSQL password (from your .env)
+POSTGRES_PASSWORD=Rebel8*7Aspen1121
+
+# Cloudflare R2 (S3-compatible storage)
 S3_ENDPOINT=https://f1e95b3e1b502cf366dfc81a863695fa.r2.cloudflarestorage.com/albion-online
 S3_ACCESS_KEY=92cf4b9b16f6fa790159014736ba4a35
 S3_SECRET_KEY=e33ee6b8ac1619d7824d73d74eda63b1775121ccbf5a5864db68fc3cfeeaf32f
 ```
+
+**Note**: Redis and Database URLs are automatically set to your self-hosted services:
+- Redis: `redis://redis-master.databases.svc.cluster.local:6379`
+- PostgreSQL: `postgresql://postgres:PASSWORD@postgresql.databases.svc.cluster.local:5432/albion`
+- These are internal Kubernetes service URLs (no secrets needed!)
 
 ### Optional for Auto-Deploy:
 ```
