@@ -296,7 +296,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     needs: [validate, build-and-push]
-    if: needs.validate.outputs.should_deploy == 'true' && env.DEPLOYMENT_MODE == 'k8s'
+    if: needs.validate.outputs.should_deploy == 'true' && vars.DEPLOYMENT_MODE == 'k8s'
 
     steps:
     - name: Checkout repository
@@ -389,7 +389,7 @@ jobs:
         echo "✅ Supabase API health check passed"
 
     - name: Health Check - Monitoring (if enabled)
-      if: secrets.ENABLE_MONITORING == 'true'
+      if: vars.ENABLE_MONITORING == 'true'
       run: |
         curl -f https://monitoring.${{ secrets.DOMAIN }}/grafana/api/health || {
           echo "⚠️ Monitoring health check failed (non-critical)"
