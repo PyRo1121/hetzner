@@ -1686,6 +1686,84 @@ EOF
     success "Monitoring stack installed with Prometheus, Grafana, and Loki"
 }
 
+# ============================================================================
+# PHASE 13: ARGOCD FOR GITOPS
+# ============================================================================
+
+install_argocd() {
+    log "🔄 Installing ArgoCD for GitOps deployment..."
+    
+    kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Label namespace to bypass some policies
+    kubectl label namespace argocd pod-security.kubernetes.io/enforce=privileged --overwrite
+    
+    # Check if already installed
+    if helm list -n argocd 2>/dev/null | grep -q "argocd.*deployed"; then
+        success "ArgoCD already installed"
+        return 0
+    fi
+    
+    # Add ArgoCD Helm repo
+    helm repo add argo https://argoproj.github.io/argo-helm
+    helm repo update
+    
+    # Install ArgoCD with Helm (bypasses Kyverno issues)
+    helm install argocd argo/argo-cd \
+        --namespace argocd \
+        --set server.service.type=ClusterIP \
+        --set configs.params."server\.insecure"=true \
+        --set controller.resources.requests.cpu=250m \
+        --set controller.resources.requests.memory=512Mi \
+        --set controller.resources.limits.cpu=500m \
+        --set controller.resources.limits.memory=1Gi \
+        --set server.resources.requests.cpu=100m \
+        --set server.resources.requests.memory=128Mi \
+        --set server.resources.limits.cpu=200m \
+        --set server.resources.limits.memory=256Mi \
+        --set repoServer.resources.requests.cpu=100m \
+        --set repoServer.resources.requests.memory=128Mi \
+        --set repoServer.resources.limits.cpu=200m \
+        --set repoServer.resources.limits.memory=256Mi \
+        --wait --timeout 5m
+    
+    # Create ingress for ArgoCD UI
+    cat <<EOF | kubectl apply -f -
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-server
+  namespace: argocd
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  rules:
+  - host: argocd.${DOMAIN}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: argocd-server
+            port:
+              number: 80
+  tls:
+  - hosts:
+    - argocd.${DOMAIN}
+    secretName: argocd-tls
+EOF
+    
+    # Get initial admin password
+    ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" 2>/dev/null | base64 -d)
+    
+    success "ArgoCD installed at https://argocd.${DOMAIN}"
+    warn "ArgoCD admin password: ${ARGOCD_PASSWORD}"
+    warn "Save this password! You can change it after first login."
+}
+
 install_uptime_kuma() {
     log "📊 Installing Uptime Kuma for public status page..."
     
@@ -2038,6 +2116,7 @@ main() {
     deploy_admin_backend
     deploy_lightweight_ml
     install_monitoring_stack
+    install_argocd
     install_uptime_kuma
     configure_cloudflare_cdn
     initialize_database_sharding
